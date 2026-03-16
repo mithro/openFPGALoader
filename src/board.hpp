@@ -64,9 +64,10 @@ typedef struct {
 } spi_pins_conf_t;
 
 enum {
-	COMM_JTAG = (1 << 0),
-	COMM_SPI  = (1 << 1),
-	COMM_DFU  = (1 << 2),
+	COMM_JTAG           = (1 << 0),
+	COMM_SPI            = (1 << 1),
+	COMM_DFU            = (1 << 2),
+	COMM_TT_MICROPYTHON = (1 << 3),
 };
 
 enum {
@@ -108,6 +109,8 @@ typedef struct {
 		{_cs, _sck, _so, _si, _holdn, _wpn}, _freq, 0, 0, -1}}
 #define DFU_BOARD(_name, _fpga_part, _cable, _vid, _pid, _alt) \
 	{_name, {"", _cable, _fpga_part, 0, 0, 0, COMM_DFU, SPI_FLASH, {}, {}, 0, _vid, _pid, _alt}}
+#define TT_BOARD(_name, _cable) \
+	{_name, {"", _cable, "ice40up5k", 0, 0, 0, COMM_TT_MICROPYTHON, SPI_FLASH, {}, {}, 0, 0, 0, -1}}
 
 static std::map <std::string, target_board_t> board_list = {
 	JTAG_BOARD("ac701",           "xc7a200tfbg676",       "digilent",     SPI_FLASH, 0, 0, CABLE_DEFAULT),
@@ -245,6 +248,9 @@ static std::map <std::string, target_board_t> board_list = {
 	JTAG_BOARD("tangprimer25k",   "",                     "ft2232",       SPI_FLASH, 0, 0, CABLE_DEFAULT),
 	JTAG_BOARD("tangmega138k",    "",                     "ft2232",       SPI_FLASH, 0, 0, CABLE_DEFAULT),
 	JTAG_BOARD("te0712_8",        "xc7a200tfbg484",       "",             SPI_FLASH, 0, 0, CABLE_MHZ(15)),
+#ifdef ENABLE_TT_MICROPYTHON
+	TT_BOARD("tt_fpga",           "tt_micropython"),
+#endif
 	JTAG_BOARD("tec0117",         "",                     "ft2232",       SPI_FLASH, 0, 0, CABLE_DEFAULT),
 	JTAG_BOARD("tec0330",         "xc7vx330tffg1157",     "",             SPI_FLASH, 0, 0, CABLE_MHZ(15)),
 	SPI_BOARD("titanium_ti60_f225","efinix", "titanium", "efinix_spi_ft4232",
