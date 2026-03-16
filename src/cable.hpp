@@ -32,6 +32,7 @@ enum communication_type {
 	MODE_ESP,              /*! esp32c3, esp32s3 */
 	MODE_XPCU,             /*! Xilinx Platform Cable USB (XPCU) */
 	MODE_RP1_PIO,          /*! Raspberry Pi 5 RP1 PIO JTAG (librp1jtag) */
+	MODE_TT_MICROPYTHON,   /*! TinyTapeout MicroPython raw REPL */
 };
 
 /*!
@@ -144,6 +145,9 @@ static std::map <std::string, cable_t> cable_list = {
 	{"xilinxPlatformCableUsb",     CABLE_DEF(MODE_XPCU, 0x03fd, 0x0013                 )},
 	{"xilinxPlatformCableUsb_alt", CABLE_DEF(MODE_XPCU, 0x03fd, 0x000D                 )},
 	{"xvc-client",         CABLE_DEF(MODE_XVC_CLIENT, 0x0000, 0x0000                   )},
+#ifdef ENABLE_TT_MICROPYTHON
+	{"tt_micropython",     CABLE_DEF(MODE_TT_MICROPYTHON, 0x2E8A, 0x0005               )},
+#endif
 #ifdef ENABLE_RP1_PIO
 	{"rp1pio",             CABLE_DEF(MODE_RP1_PIO, 0, 0x0000                        )},
 #endif
