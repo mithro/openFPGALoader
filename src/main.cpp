@@ -30,6 +30,9 @@
 #ifdef ENABLE_DFU
 #include "dfu.hpp"
 #endif
+#ifdef ENABLE_TT_MICROPYTHON
+#include "ttMicropython.hpp"
+#endif
 #include "display.hpp"
 #ifdef ENABLE_EFINIX_SUPPORT
 #include "efinix.hpp"
@@ -363,6 +366,52 @@ int main(int argc, char **argv)
 		return EXIT_SUCCESS;
 #else
 		printError("DFU support: disabled at build time");
+		return EXIT_FAILURE;
+#endif
+	}
+
+	/* --------------------------------- */
+	/* TinyTapeout MicroPython access   */
+	/* --------------------------------- */
+	if (board && board->mode == COMM_TT_MICROPYTHON) {
+#ifdef ENABLE_TT_MICROPYTHON
+		std::string serial_port = args.device;
+		if (serial_port.empty() || serial_port == "-") {
+			serial_port = TTMicropython::detectSerialPort(args.verbose);
+			if (serial_port.empty()) {
+				printError("No TinyTapeout board found");
+				return EXIT_FAILURE;
+			}
+		}
+
+		bool write_flash = (args.prg_type == Device::WR_FLASH);
+
+		try {
+			TTMicropython tt(args.bit_file, args.file_type,
+				serial_port, write_flash, args.verify, args.verbose);
+
+			if (args.detect) {
+				tt.detect();
+				return EXIT_SUCCESS;
+			}
+
+			if (args.bit_file.empty()) {
+				printError("No bitstream file specified");
+				return EXIT_FAILURE;
+			}
+
+			if (write_flash)
+				tt.program_flash();
+			else
+				tt.program_sram();
+		} catch (std::exception &e) {
+			printError("TT MicroPython failed: " + string(e.what()));
+			return EXIT_FAILURE;
+		}
+
+		return EXIT_SUCCESS;
+#else
+		printError("TinyTapeout MicroPython support: disabled at build time");
 		return EXIT_FAILURE;
 #endif
 	}
@@ -1210,12 +1259,6 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 		if (args->list_cables || args->list_boards || args->list_fpga ||
 			args->scan_usb)
 			args->is_list_command = true;
-
-		if (args->mcufw.empty()) {
-			printf("empty\n");
-		} else {
-			printf("pas empty\n");
-		}
 
 		if (args->bit_file.empty() &&
 			args->secondary_bit_file.empty() &&
