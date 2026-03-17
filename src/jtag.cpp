@@ -30,6 +30,9 @@
 #ifdef ENABLE_LIBGPIOD
 #include "libgpiodJtagBitbang.hpp"
 #endif
+#ifdef ENABLE_RP1_PIO
+#include "rp1PioJtag.hpp"
+#endif
 #ifdef ENABLE_JETSONNANOGPIO
 #include "jetsonNanoJtagBitbang.hpp"
 #endif
@@ -192,6 +195,11 @@ Jtag::Jtag(const cable_t &cable, const jtag_pins_conf_t *pin_conf,
 #else
 		std::cerr << "Jtag: support for xvc-client was not enabled at compile time" << std::endl;
 		throw std::exception();
+#endif
+#ifdef ENABLE_RP1_PIO
+	case MODE_RP1_PIO:
+		_jtag = new Rp1PioJtag(pin_conf, dev, clkHZ, verbose);
+		break;
 #endif
 #ifdef ENABLE_LIBGPIOD
 	case MODE_LIBGPIOD_BITBANG:

@@ -57,6 +57,13 @@ option(ENABLE_USB_BLASTERII    "enable Altera USB Blaster II support"         ${
 set(BLASTERII_PATH           "" CACHE STRING "usbBlasterII firmware directory")
 set(ISE_PATH "/opt/Xilinx/14.7" CACHE STRING "ise root directory (default: /opt/Xilinx/14.7)")
 
+# RP1 PIO is only available on Linux (RPi 5).
+if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+	option(ENABLE_RP1_PIO "enable RP1 PIO JTAG driver (requires librp1jtag)" OFF)
+else()
+	set(ENABLE_RP1_PIO OFF)
+endif()
+
 # Libgpiod is only available on Linux OS.
 if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 	option(ENABLE_LIBGPIOD "enable libgpiod bitbang driver (requires libgpiod)" ${ENABLE_CABLE_ALL})
@@ -573,6 +580,12 @@ list(APPEND OPENFPGALOADER_SOURCE  src/jlink.cpp)
 list(APPEND OPENFPGALOADER_HEADERS src/jlink.hpp)
 endif()
 
+# RP1 PIO JTAG support
+if (ENABLE_RP1_PIO)
+list(APPEND OPENFPGALOADER_SOURCE  src/rp1PioJtag.cpp)
+list(APPEND OPENFPGALOADER_HEADERS src/rp1PioJtag.hpp)
+endif()
+
 # libGPIOD support
 if (ENABLE_LIBGPIOD)
 list(APPEND OPENFPGALOADER_SOURCE  src/libgpiodJtagBitbang.cpp)
@@ -675,9 +688,9 @@ if (ENABLE_UDEV)
 	target_link_libraries(openFPGALoader ${LIBUDEV_LIBRARIES})
 endif()
 
-if (ENABLE_UDEV OR ENABLE_LIBGPIOD OR ENABLE_JETSONNANOGPIO)
+if (ENABLE_UDEV OR ENABLE_LIBGPIOD OR ENABLE_JETSONNANOGPIO OR ENABLE_RP1_PIO)
 	add_definitions(-DUSE_DEVICE_ARG)
-endif(ENABLE_UDEV OR ENABLE_LIBGPIOD OR ENABLE_JETSONNANOGPIO)
+endif(ENABLE_UDEV OR ENABLE_LIBGPIOD OR ENABLE_JETSONNANOGPIO OR ENABLE_RP1_PIO)
 
 if (BUILD_STATIC)
 	set_target_properties(openFPGALoader PROPERTIES LINK_SEARCH_END_STATIC 1)
@@ -770,6 +783,16 @@ if (ENABLE_LIBGPIOD)
 		message("libgpiod v1 support enabled")
 	endif()
 endif(ENABLE_LIBGPIOD)
+
+if (ENABLE_RP1_PIO)
+	target_link_libraries(openFPGALoader rp1jtag)
+	# PIOLib is a transitive dependency of librp1jtag (needed for static linking)
+	find_library(PIOLIB_LIBRARY pio)
+	if(PIOLIB_LIBRARY)
+		target_link_libraries(openFPGALoader ${PIOLIB_LIBRARY})
+	endif()
+	add_definitions(-DENABLE_RP1_PIO=1)
+endif(ENABLE_RP1_PIO)
 
 if (ENABLE_REMOTEBITBANG)
 	add_definitions(-DENABLE_REMOTEBITBANG=1)
