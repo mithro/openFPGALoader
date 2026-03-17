@@ -29,6 +29,7 @@ enum communication_type {
 	MODE_REMOTEBITBANG,    /*! Remote Bitbang mode */
 	MODE_CH347,            /*! CH347 JTAG mode */
 	MODE_GWU2X,            /*! Gowin GWU2X JTAG mode */
+	MODE_RP1_PIO,          /*! RP1 PIO JTAG mode (RPi 5) */
 	MODE_ESP,              /*! esp32c3, esp32s3 */
 };
 
@@ -137,6 +138,9 @@ static std::map <std::string, cable_t> cable_list = {
 	{"usb-blasterII_1",    CABLE_DEF(MODE_USBBLASTER, 0x09Fb, 0x6010                   )},
 	{"usb-blasterIII",     FTDI_SER(0x09fb, 0x6022, FTDI_INTF_A, 0x08, 0x3B, 0x00, 0x00)},
 	{"xvc-client",         CABLE_DEF(MODE_XVC_CLIENT, 0x0000, 0x0000                   )},
+#ifdef ENABLE_RP1_PIO
+	{"rp1pio",             CABLE_DEF(MODE_RP1_PIO, 0, 0x0000                  )},
+#endif
 #ifdef ENABLE_LIBGPIOD
 	{"libgpiod",           CABLE_DEF(MODE_LIBGPIOD_BITBANG, 0, 0x0000                  )},
 #endif
