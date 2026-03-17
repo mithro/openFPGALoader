@@ -170,10 +170,14 @@ ssize_t TTMicropython::serialRead(uint8_t *buf, size_t maxlen,
 	tv.tv_usec = (timeout_ms % 1000) * 1000;
 
 	int ret = select(_fd + 1, &rfds, NULL, NULL, &tv);
-	if (ret < 0) return -1;
-	if (ret == 0) return 0;  /* timeout */
+	if (ret < 0 && errno != EINTR) return -1;
+	if (ret <= 0) return 0;  /* timeout or EINTR */
 
-	return read(_fd, buf, maxlen);
+	ssize_t n;
+	do {
+		n = read(_fd, buf, maxlen);
+	} while (n < 0 && errno == EINTR);
+	return n;
 }
 
 void TTMicropython::drainSerial()
@@ -223,9 +227,10 @@ bool TTMicropython::enterRawRepl()
 			if (n > 0) {
 				response.append(reinterpret_cast<char *>(buf),
 				                n);
-				if (response.find("raw REPL") !=
-				    std::string::npos &&
-				    response.find('>') != std::string::npos) {
+				size_t rp = response.find("raw REPL");
+				if (rp != std::string::npos &&
+				    response.find('>', rp) !=
+				    std::string::npos) {
 					_in_raw_repl = true;
 					if (_verbose > 0)
 						printInfo("Entered MicroPython "
@@ -484,25 +489,40 @@ void TTMicropython::program_sram()
 	if (!setupSramProgramming())
 		throw std::runtime_error("SRAM programming setup failed");
 
-	/* Stream bitstream in chunks */
-	const size_t chunk_size = 256;
-	size_t total = bitstream.size();
-	size_t sent = 0;
+	/* Stream bitstream in chunks.
+	 * If any chunk fails, we must still finalize (release SS, send
+	 * dummy clocks) so the iCE40 isn't left in configuration mode.
+	 */
+	bool sram_ok = true;
+	std::string sram_err;
+	try {
+		const size_t chunk_size = 256;
+		size_t total = bitstream.size();
+		size_t sent = 0;
 
-	ProgressBar progress("Writing", total, 50, _verbose >= 0);
-	while (sent < total) {
-		size_t n = std::min(chunk_size, total - sent);
-		if (!sendBitstreamChunk(bitstream.data() + sent, n))
-			throw std::runtime_error("Failed to send bitstream chunk at offset "
-			                         + std::to_string(sent));
-		sent += n;
-		progress.display(sent);
+		ProgressBar progress("Writing", total, 50, _verbose < 0);
+		while (sent < total) {
+			size_t n = std::min(chunk_size, total - sent);
+			if (!sendBitstreamChunk(bitstream.data() + sent, n)) {
+				sram_err = "Failed to send bitstream chunk at "
+				           "offset " + std::to_string(sent);
+				sram_ok = false;
+				break;
+			}
+			sent += n;
+			progress.display(sent);
+		}
+		progress.done();
+	} catch (std::exception &e) {
+		sram_err = e.what();
+		sram_ok = false;
 	}
-	progress.done();
 
-	/* Finalize: dummy clocks, release SS */
-	if (!finalizeSramProgramming())
-		throw std::runtime_error("SRAM programming finalization failed");
+	/* Always finalize: dummy clocks, release SS */
+	finalizeSramProgramming();
+
+	if (!sram_ok)
+		throw std::runtime_error(sram_err);
 
 	/* Post-programming: restore board to a usable state.
 	 * - Release SPI pins (set to input)

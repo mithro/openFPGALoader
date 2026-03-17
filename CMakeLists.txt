@@ -51,7 +51,12 @@ option(ENABLE_DFU              "enable DFU support (requires libUSB)"         ${
 option(ENABLE_FTDI_BASED_CABLE "enable cables based on FTDI (requires libFTDI" ${ENABLE_CABLE_ALL})
 option(ENABLE_GOWIN_GWU2X      "enable Gowin GWU2X interface"                 ${ENABLE_CABLE_ALL})
 option(ENABLE_SVF_JTAG         "enable SVF support"                           ${ENABLE_CABLE_ALL})
-option(ENABLE_TT_MICROPYTHON   "enable TinyTapeout MicroPython support"       ${ENABLE_CABLE_ALL})
+# TT MicroPython uses POSIX termios and sysfs — Linux only.
+if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+	option(ENABLE_TT_MICROPYTHON "enable TinyTapeout MicroPython support" ${ENABLE_CABLE_ALL})
+else()
+	set(ENABLE_TT_MICROPYTHON OFF)
+endif()
 option(ENABLE_USB_BLASTERI     "enable Altera USB Blaster I support"          ${ENABLE_CABLE_ALL})
 option(ENABLE_USB_BLASTERII    "enable Altera USB Blaster II support"         ${ENABLE_CABLE_ALL})
 
