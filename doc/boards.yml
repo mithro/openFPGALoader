@@ -672,6 +672,20 @@
   Memory: OK
   Flash: OK
 
+- ID: netv2
+  Description: Kosagi NeTV2 (XC7A35T) on a Raspberry Pi header (GPIO JTAG)
+  URL: https://www.crowdsupply.com/alphamax/netv2
+  FPGA: Artix xc7a35tfgg484
+  Memory: OK
+  Flash: NT
+
+- ID: netv2_100
+  Description: Kosagi NeTV2 (XC7A100T) on a Raspberry Pi header (GPIO JTAG)
+  URL: https://www.crowdsupply.com/alphamax/netv2
+  FPGA: Artix xc7a100tfgg484
+  Memory: NT
+  Flash: NT
+
 - ID: nexys_a7_50
   Description: Digilent Nexys A7(Nexys 4 DDR)
   URL: https://digilent.com/reference/programmable-logic/nexys-a7/start
