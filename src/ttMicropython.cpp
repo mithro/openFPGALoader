@@ -514,12 +514,19 @@ void TTMicropython::program_sram()
 		printInfo("Configuring post-programming board state...");
 
 	ReplResult post = execRaw(R"(
-from machine import Pin, PWM
+from machine import Pin, PWM, mem32
 import time
 
-# Release SPI pins to input
-for gpio in (1, 3, 5, 6):
+# RP2350 PADS_BANK0 base — used to disable pull-ups/pull-downs
+# for true high-impedance on I/O pins.
+PADS_BANK0 = 0x40038000
+
+def set_hiz(gpio):
+    """Set a GPIO to high-impedance input with no pulls."""
     Pin(gpio, Pin.IN)
+    # Clear PUE (bit 3) and PDE (bit 2) in pad register
+    addr = PADS_BANK0 + 0x04 + gpio * 4
+    mem32[addr] = mem32[addr] & ~(0x0C)
 
 # Start clock on GPIO0 (rp_projclk) at 10MHz
 # The FPGA design needs a clock to operate
@@ -528,20 +535,22 @@ try:
     _clk.freq(10_000_000)
     _clk.duty_u16(32768)
 except Exception:
-    # If PWM fails, at least set pin as output high (static)
     Pin(0, Pin.OUT, value=1)
 
-# Ensure reset is released
+# Release CRESET (GPIO1): drive high briefly, then switch to
+# input with pull-up so the FPGA stays out of reset without
+# the RP2350 actively driving the line.
 Pin(1, Pin.OUT, value=1)
-# Then release it to input so it doesn't fight
 time.sleep_ms(1)
-Pin(1, Pin.IN)
+p1 = Pin(1, Pin.IN, Pin.PULL_UP)
 
-# Set all TT interface pins to input (no contention with PMOD HAT)
+# Set all other TT interface pins to high-impedance input
+# (no pull-up, no pull-down) so the RP2350 doesn't interfere
+# with FPGA outputs or external connections (PMOD HAT).
 for gpio in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
              17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28):
     try:
-        Pin(gpio, Pin.IN)
+        set_hiz(gpio)
     except Exception:
         pass
 
