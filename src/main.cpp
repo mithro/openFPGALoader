@@ -219,6 +219,29 @@ int main(int argc, char **argv)
 			}
 		}
 
+		/* Auto-detect GPIO cable for boards with bitbang pins but no
+		 * default cable (e.g. netv2): use rp1pio on RPi 5, libgpiod
+		 * elsewhere.
+		 */
+		if (args.cable[0] == '-' && board->cable_name.empty() &&
+		    board->jtag_pins_config.tck_pin != 0) {
+#ifdef ENABLE_RP1_PIO
+			if (access("/dev/pio0", F_OK) == 0) {
+				args.cable = "rp1pio";
+			} else
+#endif
+			{
+#ifdef ENABLE_LIBGPIOD
+				args.cable = "libgpiod";
+#else
+				printError("No GPIO cable available: "
+					"build with ENABLE_RP1_PIO or ENABLE_LIBGPIOD");
+				return EXIT_FAILURE;
+#endif
+			}
+			printInfo("Auto-detected cable: " + args.cable);
+		}
+
 		/* Xilinx only: to write flash exact fpga model must be provided */
 		if (!board->fpga_part.empty() && !args.fpga_part.empty())
 			printInfo("Board default fpga part overridden with " + args.fpga_part);
