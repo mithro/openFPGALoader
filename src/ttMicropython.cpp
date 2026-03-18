@@ -8,10 +8,18 @@
 
 #include "ttMicropython.hpp"
 
+#if defined(_WIN32) || defined(_WIN64)
+#include <setupapi.h>
+#include <devguid.h>
+#include <cfgmgr32.h>
+#pragma comment(lib, "setupapi.lib")
+#else
 #include <fcntl.h>
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
+#include <dirent.h>
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -23,6 +31,16 @@
 
 #include "display.hpp"
 #include "progressBar.hpp"
+
+/* Cross-platform millisecond sleep */
+static void sleep_ms(int ms)
+{
+#if defined(_WIN32) || defined(_WIN64)
+	Sleep(ms);
+#else
+	usleep(ms * 1000);
+#endif
+}
 
 /* ─── Base64 encoding table ─── */
 static const char b64_table[] =
@@ -52,7 +70,12 @@ TTMicropython::TTMicropython(const std::string &filename,
                              const std::string &file_type,
                              const std::string &serial_port,
                              bool write_flash, bool verify, int8_t verbose)
-    : _fd(-1),
+    :
+#if defined(_WIN32) || defined(_WIN64)
+      _serial_handle(INVALID_HANDLE_VALUE),
+#else
+      _fd(-1),
+#endif
       _filename(filename),
       _file_type(file_type),
       _serial_port(serial_port),
@@ -72,10 +95,112 @@ TTMicropython::~TTMicropython()
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- *  Serial port – POSIX termios
+ *  Serial port – platform abstraction
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-int TTMicropython::openSerial(const std::string &port)
+#if defined(_WIN32) || defined(_WIN64)
+
+/* ── Windows serial implementation ── */
+
+void TTMicropython::openSerial(const std::string &port)
+{
+	/* Windows COM ports above COM9 need the \\.\COMx prefix */
+	std::string dev = port;
+	if (dev.find("\\\\.\\") != 0 && dev.find("COM") == 0)
+		dev = "\\\\.\\" + dev;
+
+	HANDLE h = CreateFileA(dev.c_str(), GENERIC_READ | GENERIC_WRITE,
+		0, NULL, OPEN_EXISTING, 0, NULL);
+	if (h == INVALID_HANDLE_VALUE) {
+		DWORD err = GetLastError();
+		std::string hint;
+		if (err == ERROR_FILE_NOT_FOUND)
+			hint = " (device not found — is the board connected?)";
+		else if (err == ERROR_ACCESS_DENIED)
+			hint = " (access denied — another process may be using "
+			       "this port)";
+		throw std::runtime_error("Cannot open serial port " + port +
+		                         " (error " + std::to_string(err) +
+		                         ")" + hint);
+	}
+
+	/* Configure 115200 8N1, no flow control */
+	DCB dcb;
+	memset(&dcb, 0, sizeof(dcb));
+	dcb.DCBlength = sizeof(dcb);
+	if (!GetCommState(h, &dcb)) {
+		CloseHandle(h);
+		throw std::runtime_error("GetCommState failed");
+	}
+	dcb.BaudRate = CBR_115200;
+	dcb.ByteSize = 8;
+	dcb.Parity = NOPARITY;
+	dcb.StopBits = ONESTOPBIT;
+	dcb.fBinary = TRUE;
+	dcb.fOutxCtsFlow = FALSE;
+	dcb.fOutxDsrFlow = FALSE;
+	dcb.fDtrControl = DTR_CONTROL_DISABLE;
+	dcb.fRtsControl = RTS_CONTROL_DISABLE;
+	dcb.fOutX = FALSE;
+	dcb.fInX = FALSE;
+	if (!SetCommState(h, &dcb)) {
+		CloseHandle(h);
+		throw std::runtime_error("SetCommState failed");
+	}
+
+	/* Set timeouts: reads return immediately with whatever is available */
+	COMMTIMEOUTS timeouts;
+	memset(&timeouts, 0, sizeof(timeouts));
+	timeouts.ReadIntervalTimeout = MAXDWORD;
+	timeouts.ReadTotalTimeoutMultiplier = 0;
+	timeouts.ReadTotalTimeoutConstant = 0;
+	timeouts.WriteTotalTimeoutMultiplier = 0;
+	timeouts.WriteTotalTimeoutConstant = 5000;
+	SetCommTimeouts(h, &timeouts);
+
+	PurgeComm(h, PURGE_RXCLEAR | PURGE_TXCLEAR);
+
+	_serial_handle = h;
+}
+
+void TTMicropython::closeSerial()
+{
+	if (_serial_handle != INVALID_HANDLE_VALUE) {
+		CloseHandle(_serial_handle);
+		_serial_handle = INVALID_HANDLE_VALUE;
+	}
+}
+
+int TTMicropython::serialWrite(const uint8_t *data, size_t len)
+{
+	DWORD written = 0;
+	if (!WriteFile(_serial_handle, data, static_cast<DWORD>(len),
+	               &written, NULL))
+		return -1;
+	return static_cast<int>(written);
+}
+
+int TTMicropython::serialRead(uint8_t *buf, size_t maxlen,
+                              int timeout_ms)
+{
+	/* Set read timeout for this call */
+	COMMTIMEOUTS timeouts;
+	memset(&timeouts, 0, sizeof(timeouts));
+	timeouts.ReadIntervalTimeout = MAXDWORD;
+	timeouts.ReadTotalTimeoutMultiplier = MAXDWORD;
+	timeouts.ReadTotalTimeoutConstant = timeout_ms;
+	SetCommTimeouts(_serial_handle, &timeouts);
+
+	DWORD bytes_read = 0;
+	if (!ReadFile(_serial_handle, buf, static_cast<DWORD>(maxlen),
+	              &bytes_read, NULL))
+		return -1;
+	return static_cast<int>(bytes_read);
+}
+
+#else /* POSIX (Linux + macOS) */
+
+void TTMicropython::openSerial(const std::string &port)
 {
 	int fd = open(port.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
 	if (fd < 0) {
@@ -134,7 +259,6 @@ int TTMicropython::openSerial(const std::string &port)
 	tcflush(fd, TCIOFLUSH);
 
 	_fd = fd;
-	return fd;
 }
 
 void TTMicropython::closeSerial()
@@ -145,7 +269,7 @@ void TTMicropython::closeSerial()
 	}
 }
 
-ssize_t TTMicropython::serialWrite(const uint8_t *data, size_t len)
+int TTMicropython::serialWrite(const uint8_t *data, size_t len)
 {
 	size_t written = 0;
 	while (written < len) {
@@ -156,11 +280,11 @@ ssize_t TTMicropython::serialWrite(const uint8_t *data, size_t len)
 		}
 		written += n;
 	}
-	return static_cast<ssize_t>(written);
+	return static_cast<int>(written);
 }
 
-ssize_t TTMicropython::serialRead(uint8_t *buf, size_t maxlen,
-                                  int timeout_ms)
+int TTMicropython::serialRead(uint8_t *buf, size_t maxlen,
+                              int timeout_ms)
 {
 	fd_set rfds;
 	struct timeval tv;
@@ -177,8 +301,10 @@ ssize_t TTMicropython::serialRead(uint8_t *buf, size_t maxlen,
 	do {
 		n = read(_fd, buf, maxlen);
 	} while (n < 0 && errno == EINTR);
-	return n;
+	return static_cast<int>(n);
 }
+
+#endif /* _WIN32 */
 
 void TTMicropython::drainSerial()
 {
@@ -205,13 +331,13 @@ bool TTMicropython::enterRawRepl()
 			if (_verbose > 0)
 				printInfo("Retrying raw REPL entry (attempt " +
 				          std::to_string(retry + 1) + "/3)...");
-			usleep(500000);  /* 500ms between retries */
+			sleep_ms(500);  /* 500ms between retries */
 		}
 
 		/* Interrupt any running program: Ctrl-C twice */
 		const uint8_t ctrl_c[] = {0x03, 0x03};
 		serialWrite(ctrl_c, 2);
-		usleep(100000);  /* 100ms */
+		sleep_ms(100);  /* 100ms */
 		drainSerial();
 
 		/* Enter raw REPL: Ctrl-A */
@@ -695,57 +821,85 @@ print("DETECT_OK")
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- *  Auto-detection via sysfs
+ *  Auto-detection – platform-specific USB VID/PID scanning
  * ═══════════════════════════════════════════════════════════════════════════ */
 
+/* Target VID/PID: Raspberry Pi MicroPython
+ * VID=0x2E8A, PID=0x0005 (RP2040) or PID=0x0011 (RP2350)
+ */
+static bool isTTMicropythonVidPid(uint16_t vid, uint16_t pid)
+{
+	return vid == 0x2E8A && (pid == 0x0005 || pid == 0x0011);
+}
+
+#if defined(_WIN32) || defined(_WIN64)
+
+/* ── Windows: enumerate COM ports via SetupDi ── */
 std::string TTMicropython::detectSerialPort(int8_t verbose)
 {
-	/* Scan /dev/ttyACM* and check USB VID/PID via sysfs.
-	 * VID=0x2E8A (Raspberry Pi), PID=0x0005 or 0x0011 (MicroPython)
-	 */
 	std::vector<std::string> candidates;
 
-	for (int i = 0; i < 16; i++) {
-		std::string dev = "/dev/ttyACM" + std::to_string(i);
-
-		/* Check if device exists */
-		if (access(dev.c_str(), F_OK) != 0)
-			continue;
-
-		/* Read VID/PID from sysfs */
-		/* Path: /sys/class/tty/ttyACMN/device/../idVendor */
-		std::string sysfs_base = "/sys/class/tty/ttyACM" +
-		                         std::to_string(i) + "/device/..";
-
-		std::string vid_path = sysfs_base + "/idVendor";
-		std::string pid_path = sysfs_base + "/idProduct";
-
-		std::ifstream vid_file(vid_path);
-		std::ifstream pid_file(pid_path);
-
-		if (!vid_file.is_open() || !pid_file.is_open())
-			continue;
-
-		std::string vid_str, pid_str;
-		std::getline(vid_file, vid_str);
-		std::getline(pid_file, pid_str);
-
-		if (verbose > 0)
-			printInfo("ttyACM" + std::to_string(i) + ": VID=" +
-			          vid_str + " PID=" + pid_str);
-
-		/* Check for Raspberry Pi MicroPython:
-		 * VID=2e8a, PID=0005 (RP2040) or PID=0011 (RP2350)
-		 */
-		if (vid_str == "2e8a" &&
-		    (pid_str == "0005" || pid_str == "0011")) {
-			candidates.push_back(dev);
-		}
+	HDEVINFO devInfo = SetupDiGetClassDevs(&GUID_DEVINTERFACE_COMPORT,
+		NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+	if (devInfo == INVALID_HANDLE_VALUE) {
+		printError("No TinyTapeout board found (SetupDi enumeration "
+		           "failed)");
+		return "";
 	}
+
+	SP_DEVINFO_DATA devInfoData;
+	devInfoData.cbSize = sizeof(devInfoData);
+
+	for (DWORD i = 0; SetupDiEnumDeviceInfo(devInfo, i, &devInfoData);
+	     i++) {
+		/* Get hardware ID to extract VID/PID */
+		char hwId[256] = {0};
+		if (!SetupDiGetDeviceRegistryPropertyA(devInfo, &devInfoData,
+		    SPDRP_HARDWAREID, NULL, (BYTE *)hwId, sizeof(hwId),
+		    NULL))
+			continue;
+
+		/* Parse VID/PID from hardware ID string like
+		 * "USB\\VID_2E8A&PID_0005&..." */
+		std::string hwIdStr(hwId);
+		uint16_t vid = 0, pid = 0;
+		size_t vpos = hwIdStr.find("VID_");
+		size_t ppos = hwIdStr.find("PID_");
+		if (vpos != std::string::npos)
+			vid = static_cast<uint16_t>(
+				strtoul(hwIdStr.c_str() + vpos + 4, NULL, 16));
+		if (ppos != std::string::npos)
+			pid = static_cast<uint16_t>(
+				strtoul(hwIdStr.c_str() + ppos + 4, NULL, 16));
+
+		if (!isTTMicropythonVidPid(vid, pid))
+			continue;
+
+		/* Get COM port name from registry */
+		HKEY key = SetupDiOpenDevRegKey(devInfo, &devInfoData,
+			DICS_FLAG_GLOBAL, 0, DIREG_DEV, KEY_READ);
+		if (key == INVALID_HANDLE_VALUE)
+			continue;
+
+		char portName[64] = {0};
+		DWORD portNameLen = sizeof(portName);
+		DWORD type = 0;
+		if (RegQueryValueExA(key, "PortName", NULL, &type,
+		    (BYTE *)portName, &portNameLen) == ERROR_SUCCESS) {
+			if (verbose > 0)
+				printInfo(std::string(portName) +
+				          ": VID=" + std::to_string(vid) +
+				          " PID=" + std::to_string(pid));
+			candidates.push_back(std::string(portName));
+		}
+		RegCloseKey(key);
+	}
+
+	SetupDiDestroyDeviceInfoList(devInfo);
 
 	if (candidates.empty()) {
 		printError("No TinyTapeout board found (no RP2040/RP2350 "
-		           "MicroPython device on /dev/ttyACM*)");
+		           "MicroPython COM port detected)");
 		return "";
 	}
 
@@ -762,3 +916,129 @@ std::string TTMicropython::detectSerialPort(int8_t verbose)
 
 	return candidates[0];
 }
+
+#elif defined(__APPLE__)
+
+/* ── macOS: scan /dev/cu.usbmodem* ── */
+std::string TTMicropython::detectSerialPort(int8_t verbose)
+{
+	/* On macOS, RP2040/RP2350 MicroPython devices appear as
+	 * /dev/cu.usbmodemXXXX. We can't easily read VID/PID from
+	 * userspace without IOKit, so we match by device name pattern
+	 * and rely on the user to specify -d if multiple devices exist.
+	 */
+	std::vector<std::string> candidates;
+
+	DIR *dir = opendir("/dev");
+	if (!dir) {
+		printError("No TinyTapeout board found (cannot scan /dev)");
+		return "";
+	}
+
+	struct dirent *entry;
+	while ((entry = readdir(dir)) != NULL) {
+		std::string name(entry->d_name);
+		if (name.find("cu.usbmodem") == 0) {
+			std::string dev = "/dev/" + name;
+			if (verbose > 0)
+				printInfo("Found USB modem device: " + dev);
+			candidates.push_back(dev);
+		}
+	}
+	closedir(dir);
+
+	if (candidates.empty()) {
+		printError("No TinyTapeout board found (no /dev/cu.usbmodem* "
+		           "device detected)");
+		return "";
+	}
+
+	if (candidates.size() > 1) {
+		printWarn("Multiple USB modem devices found:");
+		for (const auto &c : candidates)
+			printWarn("  " + c);
+		printWarn("Using first: " + candidates[0]);
+		printWarn("Use -d to specify device explicitly");
+	}
+
+	if (verbose >= 0)
+		printInfo("Auto-detected TT FPGA board on " + candidates[0]);
+
+	return candidates[0];
+}
+
+#else
+
+/* ── Linux: scan /dev/ttyACM* + sysfs VID/PID ── */
+std::string TTMicropython::detectSerialPort(int8_t verbose)
+{
+	std::vector<std::string> candidates;
+
+	DIR *dir = opendir("/sys/class/tty");
+	if (!dir) {
+		printError("No TinyTapeout board found (cannot scan "
+		           "/sys/class/tty)");
+		return "";
+	}
+
+	struct dirent *entry;
+	while ((entry = readdir(dir)) != NULL) {
+		std::string name(entry->d_name);
+		if (name.find("ttyACM") != 0)
+			continue;
+
+		std::string dev = "/dev/" + name;
+		if (access(dev.c_str(), F_OK) != 0)
+			continue;
+
+		/* Read VID/PID from sysfs */
+		std::string sysfs_base = "/sys/class/tty/" + name +
+		                         "/device/..";
+		std::ifstream vid_file(sysfs_base + "/idVendor");
+		std::ifstream pid_file(sysfs_base + "/idProduct");
+
+		if (!vid_file.is_open() || !pid_file.is_open())
+			continue;
+
+		std::string vid_str, pid_str;
+		std::getline(vid_file, vid_str);
+		std::getline(pid_file, pid_str);
+
+		uint16_t vid = static_cast<uint16_t>(
+			strtoul(vid_str.c_str(), NULL, 16));
+		uint16_t pid = static_cast<uint16_t>(
+			strtoul(pid_str.c_str(), NULL, 16));
+
+		if (verbose > 0)
+			printInfo(name + ": VID=" + vid_str +
+			          " PID=" + pid_str);
+
+		if (isTTMicropythonVidPid(vid, pid))
+			candidates.push_back(dev);
+	}
+	closedir(dir);
+
+	if (candidates.empty()) {
+		printError("No TinyTapeout board found (no RP2040/RP2350 "
+		           "MicroPython device on /dev/ttyACM*)");
+		return "";
+	}
+
+	/* Sort for deterministic selection */
+	std::sort(candidates.begin(), candidates.end());
+
+	if (candidates.size() > 1) {
+		printWarn("Multiple candidate devices found:");
+		for (const auto &c : candidates)
+			printWarn("  " + c);
+		printWarn("Using first: " + candidates[0]);
+		printWarn("Use -d to specify device explicitly");
+	}
+
+	if (verbose >= 0)
+		printInfo("Auto-detected TT FPGA board on " + candidates[0]);
+
+	return candidates[0];
+}
+
+#endif /* platform detection */

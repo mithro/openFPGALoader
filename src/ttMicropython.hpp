@@ -12,6 +12,10 @@
 #include <cstdint>
 #include <string>
 
+#if defined(_WIN32) || defined(_WIN64)
+#include <windows.h>
+#endif
+
 class TTMicropython {
  public:
 	TTMicropython(const std::string &filename, const std::string &file_type,
@@ -20,7 +24,9 @@ class TTMicropython {
 	~TTMicropython();
 
 	/* Auto-detect a TT FPGA Demo Board serial port.
-	 * Scans /dev/ttyACM* and checks USB VID/PID via sysfs.
+	 * Linux: scans /dev/ttyACM* + sysfs VID/PID
+	 * macOS: scans /dev/cu.usbmodem* + IOKit VID/PID
+	 * Windows: enumerates COM ports via SetupDi + registry VID/PID
 	 */
 	static std::string detectSerialPort(int8_t verbose);
 
@@ -29,11 +35,11 @@ class TTMicropython {
 	void detect();           /* Probe board, print info */
 
  private:
-	/* Serial port (POSIX termios) */
-	int openSerial(const std::string &port);
+	/* Serial port (platform-abstracted) */
+	void openSerial(const std::string &port);
 	void closeSerial();
-	ssize_t serialWrite(const uint8_t *data, size_t len);
-	ssize_t serialRead(uint8_t *buf, size_t maxlen, int timeout_ms);
+	int serialWrite(const uint8_t *data, size_t len);
+	int serialRead(uint8_t *buf, size_t maxlen, int timeout_ms);
 	void drainSerial();
 
 	/* MicroPython raw REPL protocol */
@@ -51,7 +57,11 @@ class TTMicropython {
 	bool sendBitstreamChunk(const uint8_t *data, size_t len);
 	bool finalizeSramProgramming();
 
+#if defined(_WIN32) || defined(_WIN64)
+	HANDLE _serial_handle;
+#else
 	int _fd;
+#endif
 	std::string _filename;
 	std::string _file_type;
 	std::string _serial_port;
