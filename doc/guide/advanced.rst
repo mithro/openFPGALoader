@@ -83,6 +83,25 @@ Writing to an arbitrary address in flash memory
 With FPGA using an external SPI flash (*xilinx*, *lattice ECP5/nexus/ice40*, *anlogic*, *efinix*) option ``-o`` allows
 one to write raw binary file to an arbitrary adress in FLASH.
 
+Display detailed SPI flash information
+======================================
+
+``--flash-info`` works like ``--detect -f`` but also displays:
+
+* manufacturer, part name and size (from the internal database, SFDP or the JEDEC ID),
+* factory programmed unique ID / serial number when the manufacturer provides one
+  (Winbond, GigaDevice, ISSI, Puya, Micron N25Q/MT25Q, Infineon S25FL-L, SST26),
+* the JEDEC SFDP (JESD216) content: supported read modes (1-1-2, 1-2-2, 2-2-2,
+  1-1-4, 1-4-4, 4-4-4) with opcodes and dummy clocks, DTR (DDR) support,
+  4-Byte address and DTR read instructions, erase types, page size and
+  quad enable method.
+
+.. code-block:: bash
+
+    openFPGALoader -b arty --flash-info
+
+Only read-only commands are sent to the flash.
+
 Detect/read/write on primary/secondary flash memories
 =====================================================
 
