@@ -305,8 +305,10 @@ int main(int argc, char **argv)
 	if (args.spi || (board && board->mode == COMM_SPI))
 		return spi_comm(args, cable, &pins_config, board);
 #else
+	if (args.spi || (board && board->mode == COMM_SPI)) {
 		printError("SPI Flash Direct access: disabled at build time");
 		return EXIT_FAILURE;
+	}
 #endif
 
 	/* ------------------- */
