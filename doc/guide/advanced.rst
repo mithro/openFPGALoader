@@ -90,7 +90,8 @@ Display detailed SPI flash information
 
 * manufacturer, part name and size (from the internal database, SFDP or the JEDEC ID),
 * factory programmed unique ID / serial number when the manufacturer provides one
-  (Winbond, GigaDevice, ISSI, Puya, Micron N25Q/MT25Q, Infineon S25FL-L, SST26),
+  (Winbond, GigaDevice, ISSI, Puya, Micron N25Q/MT25Q, Spansion S25FL128S/256S,
+  Infineon S25FL-L, SST26),
 * the JEDEC SFDP (JESD216) content: supported read modes (1-1-2, 1-2-2, 2-2-2,
   1-1-4, 1-4-4, 4-4-4) with opcodes and dummy clocks, DTR (DDR) support,
   4-Byte address and DTR read instructions, erase types, page size and
