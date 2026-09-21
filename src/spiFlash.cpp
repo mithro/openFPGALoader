@@ -16,6 +16,7 @@
 #include "display.hpp"
 #include "spiFlash.hpp"
 #include "spiFlashdb.hpp"
+#include "spiFlashSfdp.hpp"
 #include "flashInterface.hpp"
 
 /* read/write status register : 0B addr + 0 dummy */
@@ -47,6 +48,14 @@
 #define FLASH_RDFR     0x48
 /* Read OTP : 3 B addr + 8 clk cycle*/
 #define FLASH_ROTP     0x4B
+/* read unique ID (Winbond, GigaDevice, ISSI, Puya): 4 dummy Bytes */
+#define FLASH_RUID     0x4B
+/* read unique ID (Infineon S25FL-L): 4 dummy Bytes */
+#define FLASH_RUID_S25FLL 0x4C
+/* read SFDP: 3B addr + 8 clk cycle */
+#define FLASH_RDSFDP   0x5A
+/* read security ID (SST26): 2B addr + 8 clk cycle */
+#define FLASH_RSID     0x88
 /* block (32Kb) erase */
 #define FLASH_BE32     0x52
 /* block (32Kb) erase with 4-byte address */
@@ -664,6 +673,178 @@ void SPIFlash::read_id()
 			}
 		}
 	}
+}
+
+/* JEP106 bank 1 manufacturer IDs commonly found on FPGA boards */
+std::string SPIFlash::manufacturer_name(uint8_t mfr_id)
+{
+	switch (mfr_id) {
+		case 0x01: return "Spansion / Cypress / Infineon";
+		case 0x0B: return "XTX";
+		case 0x1C: return "EON";
+		case 0x1F: return "Atmel / Adesto / Renesas";
+		case 0x20: return "Micron (ST / Numonyx) or XMC";
+		case 0x2C: return "Micron";
+		case 0x37: return "AMIC";
+		case 0x5E: return "Zbit";
+		case 0x68: return "Boya";
+		case 0x85: return "Puya";
+		case 0x8C: return "ESMT";
+		case 0x9D: return "ISSI";
+		case 0xA1: return "Fudan";
+		case 0xBA: return "Zetta";
+		case 0xBF: return "SST / Microchip";
+		case 0xC2: return "Macronix";
+		case 0xC8: return "GigaDevice";
+		case 0xEF: return "Winbond";
+		default:   return "unknown";
+	}
+}
+
+bool SPIFlash::read_sfdp(uint32_t addr, uint8_t *data, uint32_t len)
+{
+	/* 0x5A + 3 Byte address + 8 dummy clocks */
+	std::vector<uint8_t> tx(len + 4, 0), rx(len + 4, 0);
+	tx[0] = (addr >> 16) & 0xff;
+	tx[1] = (addr >>  8) & 0xff;
+	tx[2] = (addr      ) & 0xff;
+	if (_spi->spi_put(FLASH_RDSFDP, tx.data(), rx.data(), len + 4) != 0)
+		return false;
+	memcpy(data, rx.data() + 4, len);
+	return true;
+}
+
+bool SPIFlash::read_unique_id(std::vector<uint8_t> &uid, std::string &method)
+{
+	const uint8_t mfr = (_jedec_id >> 24) & 0xff;
+	const uint8_t mem_type = (_jedec_id >> 16) & 0xff;
+	uint8_t cmd;
+	uint32_t skip;     /* address + dummy Bytes sent before the ID */
+	uint32_t uid_len;
+
+	/* only read-only commands, and only when the vendor/family is known:
+	 * the same opcode may have another meaning on other devices
+	 */
+	switch (mfr) {
+		case 0xEF:  /* Winbond W25Q: 4 dummy Bytes, 64 bits */
+			cmd = FLASH_RUID; skip = 4; uid_len = 8;
+			break;
+		case 0xC8:  /* GigaDevice GD25Q: 3 addr + 1 dummy, 128 bits */
+		case 0x9D:  /* ISSI IS25LP/WP: 3 addr + 1 dummy, 128 bits */
+		case 0x85:  /* Puya P25Q: 3 addr + 1 dummy, 128 bits */
+			cmd = FLASH_RUID; skip = 4; uid_len = 16;
+			break;
+		case 0x20:
+			/* Micron N25Q/MT25Q: extended RDID, byte 3 = remaining
+			 * length (0x10), bytes 6-19: 14 Bytes UID
+			 */
+			if (mem_type != 0xBA && mem_type != 0xBB)
+				return false;
+			cmd = 0x9F; skip = 6; uid_len = 14;
+			break;
+		case 0x01:  /* Infineon S25FL-L: RUID 0x4C, 4 dummy, 64 bits */
+			if (mem_type != 0x60)
+				return false;
+			cmd = FLASH_RUID_S25FLL; skip = 4; uid_len = 8;
+			break;
+		case 0xBF:  /* SST26: Security ID 0x88, 2 addr + 1 dummy, 64 bits */
+			if (mem_type != 0x26)
+				return false;
+			cmd = FLASH_RSID; skip = 3; uid_len = 8;
+			break;
+		default:
+			return false;
+	}
+
+	std::vector<uint8_t> tx(skip + uid_len, 0), rx(skip + uid_len, 0);
+	if (_spi->spi_put(cmd, tx.data(), rx.data(), skip + uid_len) != 0)
+		return false;
+	if (cmd == 0x9F && rx[3] != 0x10)
+		return false;
+
+	uid.assign(rx.begin() + skip, rx.end());
+
+	char buf[64];
+	snprintf(buf, sizeof(buf), "opcode 0x%02X, %u bits", cmd, uid_len * 8);
+	method = buf;
+
+	/* blank (all 0x00 or all 0xFF): not a real ID */
+	bool all_00 = true, all_ff = true;
+	for (auto b : uid) {
+		all_00 &= (b == 0x00);
+		all_ff &= (b == 0xff);
+	}
+	return !(all_00 || all_ff);
+}
+
+void SPIFlash::display_info()
+{
+	const uint8_t mfr = (_jedec_id >> 24) & 0xff;
+	const uint8_t mem_type = (_jedec_id >> 16) & 0xff;
+	const uint8_t capacity = (_jedec_id >> 8) & 0xff;
+
+	/* SFDP: failure is not an error (old parts) */
+	SFDP sfdp;
+	try {
+		sfdp.parse([this](uint32_t addr, uint8_t *buf, uint32_t len) {
+				return read_sfdp(addr, buf, len);});
+	} catch (std::exception &e) {
+		printWarn(std::string("SFDP read failed: ") + e.what());
+	}
+
+	printf("\nSPI Flash information\n");
+	printf("JEDEC ID          : 0x%06x (manufacturer 0x%02x, type 0x%02x, "
+			"capacity 0x%02x)\n", _jedec_id >> 8, mfr, mem_type, capacity);
+	printf("Manufacturer      : %s\n",
+			_flash_model ? _flash_model->manufacturer.c_str() :
+			manufacturer_name(mfr).c_str());
+	printf("Part              : %s\n",
+			_flash_model ? _flash_model->model.c_str() :
+			"unknown (not in openFPGALoader database)");
+
+	/* size: database first, then SFDP, then guess from JEDEC capacity */
+	uint64_t size = 0;
+	std::string size_src;
+	if (_flash_model) {
+		size = (uint64_t)_flash_model->nr_sector * 0x10000;
+		size_src = "database";
+	} else if (sfdp.has_bfpt()) {
+		size = sfdp.density_bits() / 8;
+		size_src = "SFDP";
+	} else if (capacity >= 0x10 && capacity <= 0x19) {
+		/* 2^n Byte encoding used by most (not all) vendors */
+		size = 1ULL << capacity;
+		size_src = "guessed from JEDEC capacity byte";
+	}
+	if (size)
+		printf("Size              : %llu Byte (%llu MiB / %llu Mbit, %s)\n",
+				(unsigned long long)size,
+				(unsigned long long)(size >> 20),
+				(unsigned long long)(size >> 17), size_src.c_str());
+	else
+		printf("Size              : unknown\n");
+	if (_flash_model && sfdp.has_bfpt() &&
+			sfdp.density_bits() / 8 != size)
+		printWarn("SFDP size (" + std::to_string(sfdp.density_bits() / 8) +
+				" Byte) differs from database");
+
+	std::vector<uint8_t> uid;
+	std::string method;
+	if (read_unique_id(uid, method)) {
+		printf("Unique ID         : ");
+		for (auto b : uid)
+			printf("%02x", b);
+		printf(" (%s)\n", method.c_str());
+	} else if (!method.empty()) {
+		printf("Unique ID         : blank (%s returned all 0x00/0xFF)\n",
+				method.c_str());
+	} else {
+		printf("Unique ID         : not available (unsupported for "
+				"this manufacturer/part)\n");
+	}
+
+	sfdp.display();
+	printf("\n");
 }
 
 void SPIFlash::display_status_reg(uint8_t reg)
