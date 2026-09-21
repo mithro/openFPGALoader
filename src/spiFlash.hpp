@@ -161,6 +161,13 @@ class SPIFlash {
 		 */
 		uid_state_t read_unique_id(std::vector<uint8_t> &uid, uint8_t &opcode);
 		/*!
+		 * \brief JSON records (one per flash) built by display_info()
+		 *        since the start of the program
+		 */
+		static const std::vector<std::string> &info_json_records() {
+			return _info_json_records;
+		}
+		/*!
 		 * \brief return manufacturer name based on JEDEC manufacturer ID
 		 */
 		static std::string manufacturer_name(uint8_t mfr_id);
@@ -214,6 +221,7 @@ class SPIFlash {
 		bool _unprotect; /**< allows to unprotect memory before write */
 		bool _must_relock;
 		uint8_t _status;
+		static std::vector<std::string> _info_json_records;
 };
 
 #endif  // SRC_SPIFLASH_HPP_
