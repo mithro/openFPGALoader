@@ -46,7 +46,13 @@ class Device {
 		/**********************/
 		/*    flash access    */
 		/**********************/
-		virtual bool detect_flash() {
+		/*!
+		 * \brief detect and display SPI flash
+		 * \param[in] full_info: also display manufacturer, size,
+		 *            unique ID and SFDP details (read modes, ...)
+		 */
+		virtual bool detect_flash(bool full_info) {
+			(void) full_info;
 			printError("detect flash not supported"); return false;}
 		virtual bool dumpFlash(uint32_t base_addr, uint32_t len) {
 			(void) base_addr; (void) len;

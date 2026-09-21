@@ -178,7 +178,7 @@ bool CologneChip::post_flash_access()
 /**
  * Dump flash contents to file. Works in both SPI and JTAG-SPI-bypass mode.
  */
-bool CologneChip::detect_flash()
+bool CologneChip::detect_flash(bool full_info)
 {
 	/* prepare SPI access */
 	prepare_flash_access();
@@ -189,6 +189,8 @@ bool CologneChip::detect_flash()
 				new SPIFlash(reinterpret_cast<FlashInterface *>(_spi), false, _verbose):
 				new SPIFlash(this, false, _verbose));
 		flash->read_id();
+		if (full_info)
+			flash->display_info();
 		flash->display_status_reg();
 	} catch (std::exception &e) {
 		printError("Fail");

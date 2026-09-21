@@ -40,8 +40,8 @@ class Lattice: public Device, FlashInterface {
 		/*!
 		 * \brief display SPI flash ID and status register
 		 */
-		bool detect_flash() override {
-			return FlashInterface::detect_flash();
+		bool detect_flash(bool full_info) override {
+			return FlashInterface::detect_flash(full_info);
 		}
 		/*!
 		 * \brief protect SPI flash blocks

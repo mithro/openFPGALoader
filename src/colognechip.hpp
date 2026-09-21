@@ -37,7 +37,7 @@ class CologneChip: public Device, FlashInterface {
 
 		bool cfgDone();
 		void waitCfgDone();
-		bool detect_flash() override;
+		bool detect_flash(bool full_info) override;
 		bool dumpFlash(uint32_t base_addr, uint32_t len) override;
 		virtual bool protect_flash(uint32_t len) override {
 			(void) len;
