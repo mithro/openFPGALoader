@@ -103,6 +103,11 @@ Display detailed SPI flash information
 
 Only read-only commands are sent to the flash.
 
+The report is not displayed, and openFPGALoader exits with an error, when
+the JEDEC ID is not a valid one (manufacturer code failing JEP106 odd
+parity) or is not the same when read twice: this happens when the flash
+is not really reached (ie SPI bridge not loaded).
+
 Detect/read/write on primary/secondary flash memories
 =====================================================
 

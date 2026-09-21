@@ -837,8 +837,16 @@ int spi_comm(struct arguments args, const cable_t &cable,
 		}
 
 		SPIFlash flash((FlashInterface *)spi, args.unprotect_flash, args.verbose);
-		if (args.flash_info)
-			flash.display_info();
+		if (args.flash_info) {
+			try {
+				flash.display_info();
+			} catch (std::exception &e) {
+				printError("Fail");
+				printError(e.what());
+				delete spi;
+				return EXIT_FAILURE;
+			}
+		}
 		flash.display_status_reg();
 
 		if (args.prg_type != Device::RD_FLASH &&
