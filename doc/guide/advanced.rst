@@ -108,6 +108,29 @@ the JEDEC ID is not a valid one (manufacturer code failing JEP106 odd
 parity) or is not the same when read twice: this happens when the flash
 is not really reached (ie SPI bridge not loaded).
 
+For scripts, ``--flash-info-json FILE`` does the same and also writes the
+information to ``FILE`` as JSON. The file is only written when every flash
+access succeeded (a previous ``FILE`` is removed at start), so an existing
+file and a zero exit status mean the content was read:
+
+.. code-block:: json
+
+    {"format": "openFPGALoader-flash-info", "version": 1, "flashes": [
+      {"jedec_id": "0x010219", "manufacturer_id": "0x01", "memory_type": "0x02",
+       "capacity": "0x19", "manufacturer": "spansion",
+       "manufacturer_jep106": "Spansion / Cypress / Infineon",
+       "part": "S25FL256S", "size_bytes": 33554432, "size_source": "database",
+       "unique_id": {"state": "read", "value": "e2789916a0809a22bbc76634c1bf53ed",
+                     "bits": 128, "opcode": "0x4b"},
+       "sfdp": null}]}
+
+``flashes`` has one entry per flash (two with ``--target-flash both``).
+``unique_id.state`` is ``read``, ``blank`` (read, all ``0x00``/``0xFF``) or
+``none`` (no known unique ID command for this part); a failed unique ID read
+is an error. ``sfdp`` is ``null`` without SFDP, otherwise it holds the tables,
+``bfpt`` (density, address mode, DTR, page size, read modes with opcode and
+mode/dummy clocks, erase types, quad enable) and ``read_4byte``.
+
 Detect/read/write on primary/secondary flash memories
 =====================================================
 

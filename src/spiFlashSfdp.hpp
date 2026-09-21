@@ -94,6 +94,8 @@ class SFDP {
 
 		/* display everything on stdout */
 		void display(uint8_t mfr_id) const;
+		/* everything as a JSON object ("null" when no SFDP) */
+		std::string to_json(uint8_t mfr_id) const;
 
 	private:
 		uint32_t dw(uint8_t index) const {  // 1-based as in JESD216
@@ -106,5 +108,9 @@ class SFDP {
 		std::vector<uint32_t> _bfpt;
 		std::vector<uint32_t> _4bait;
 };
+
+/* JSON helpers */
+std::string json_string(const std::string &s);  /* quoted and escaped */
+std::string json_hex(uint32_t v, int digits);     /* "0x..." lowercase */
 
 #endif  // SRC_SPIFLASHSFDP_HPP_

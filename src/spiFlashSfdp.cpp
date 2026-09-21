@@ -312,3 +312,97 @@ void SFDP::display(uint8_t mfr_id) const
 	if (!qer.empty())
 		printf("Quad enable       : %s\n", qer.c_str());
 }
+
+std::string json_string(const std::string &s)
+{
+	std::string out = "\"";
+	for (unsigned char c : s) {
+		if (c == '"' || c == '\\') {
+			out += '\\';
+			out += c;
+		} else if (c < 0x20) {
+			char buf[8];
+			snprintf(buf, sizeof(buf), "\\u%04x", c);
+			out += buf;
+		} else {
+			out += c;
+		}
+	}
+	return out + "\"";
+}
+
+std::string json_hex(uint32_t v, int digits)
+{
+	char buf[16];
+	snprintf(buf, sizeof(buf), "\"0x%0*x\"", digits, v);
+	return buf;
+}
+
+std::string SFDP::to_json(uint8_t mfr_id) const
+{
+	if (!_valid)
+		return "null";
+
+	std::string j = "{\"revision\": " +
+		json_string(std::to_string(_major) + "." + std::to_string(_minor));
+
+	j += ", \"tables\": [";
+	for (size_t i = 0; i < _headers.size(); i++) {
+		const sfdp_param_header_t &h = _headers[i];
+		j += (i ? ", " : "");
+		j += "{\"id\": " + json_hex(h.id, 4) +
+			", \"revision\": " + json_string(std::to_string(h.major) + "." +
+					std::to_string(h.minor)) +
+			", \"dwords\": " + std::to_string(h.length) +
+			", \"address\": " + json_hex(h.ptp, 6) +
+			", \"name\": " + json_string(table_name(h.id, mfr_id)) + "}";
+	}
+	j += "]";
+
+	if (!has_bfpt())
+		return j + ", \"bfpt\": null}";
+
+	static const char *addr_modes[] = {"3-byte", "3-or-4-byte", "4-byte",
+		"reserved"};
+	j += ", \"bfpt\": {\"density_bits\": " + std::to_string(density_bits()) +
+		", \"address_mode\": " + json_string(addr_modes[address_bytes()]) +
+		", \"dtr\": " + (dtr_support() ? "true" : "false") +
+		", \"page_size\": " +
+		(page_size() ? std::to_string(page_size()) : std::string("null"));
+
+	j += ", \"read_modes\": [";
+	const std::vector<sfdp_read_mode_t> modes = read_modes();
+	for (size_t i = 0; i < modes.size(); i++)
+		j += std::string(i ? ", " : "") + "{\"mode\": " +
+			json_string(modes[i].name) +
+			", \"opcode\": " + json_hex(modes[i].opcode, 2) +
+			", \"mode_clocks\": " + std::to_string(modes[i].mode_clocks) +
+			", \"dummy_clocks\": " + std::to_string(modes[i].dummy_clocks) + "}";
+	j += "]";
+
+	j += ", \"erase_types\": [";
+	const std::vector<sfdp_erase_type_t> erase = erase_types();
+	for (size_t i = 0; i < erase.size(); i++)
+		j += std::string(i ? ", " : "") + "{\"size\": " +
+			std::to_string(erase[i].size) +
+			", \"opcode\": " + json_hex(erase[i].opcode, 2) + "}";
+	j += "]";
+
+	const std::string qer = quad_enable_req();
+	j += ", \"quad_enable\": " + (qer.empty() ? std::string("null") :
+			json_string(qer)) + "}";
+
+	j += ", \"read_4byte\": ";
+	if (!has_4bait()) {
+		j += "null";
+	} else {
+		j += "[";
+		const std::vector<sfdp_4b_instr_t> instr = read_4b_instr();
+		for (size_t i = 0; i < instr.size(); i++)
+			j += std::string(i ? ", " : "") + "{\"name\": " +
+				json_string(instr[i].name) +
+				", \"opcode\": " + json_hex(instr[i].opcode, 2) + "}";
+		j += "]";
+	}
+	return j + "}";
+}
