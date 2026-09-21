@@ -91,7 +91,9 @@ Display detailed SPI flash information
 * manufacturer, part name and size (from the internal database, SFDP or the JEDEC ID),
 * factory programmed unique ID / serial number when the manufacturer provides one
   (Winbond, GigaDevice, ISSI, Puya, Micron N25Q/MT25Q, Spansion S25FL128S/256S,
-  Infineon S25FL-L, SST26),
+  Infineon S25FL-L, SST26, and Macronix when its secured OTP holds a factory
+  programmed ESN: most Macronix parts ship without one, and the report then
+  says so, from the security register),
 * the JEDEC SFDP (JESD216) content: supported read modes (1-1-2, 1-2-2, 2-2-2,
   1-1-4, 1-4-4, 4-4-4) with opcodes and dummy clocks, DTR (DDR) support,
   4-Byte address and DTR read instructions, erase types, page size and
@@ -127,7 +129,8 @@ file and a zero exit status mean the content was read:
 ``flashes`` has one entry per flash (two with ``--target-flash both``).
 ``unique_id.state`` is ``read``, ``blank`` (read, all ``0x00``/``0xFF``) or
 ``none`` (no known unique ID command for this part); a failed unique ID read
-is an error. ``sfdp`` is ``null`` without SFDP, otherwise it holds the tables,
+is an error. ``unique_id.note`` explains a ``none`` when the reason is known
+(ie a Macronix part without factory ESN), otherwise it is ``null``. ``sfdp`` is ``null`` without SFDP, otherwise it holds the tables,
 ``bfpt`` (density, address mode, DTR, page size, read modes with opcode and
 mode/dummy clocks, erase types, quad enable) and ``read_4byte``.
 
