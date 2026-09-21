@@ -237,7 +237,7 @@ std::vector<sfdp_4b_instr_t> SFDP::read_4b_instr() const
 	return instr;
 }
 
-std::string SFDP::table_name(uint16_t id)
+std::string SFDP::table_name(uint16_t id, uint8_t mfr_id)
 {
 	switch (id) {
 		case 0xFF00: return "Basic Flash Parameter Table";
@@ -246,9 +246,10 @@ std::string SFDP::table_name(uint16_t id)
 		case 0xFF87: return "Status, Control and Configuration Register Map";
 		default: break;
 	}
-	if ((id >> 8) == 0xFF)
-		return "JEDEC table";
-	return "vendor table";
+	/* the LSB of a vendor table ID is the manufacturer JEDEC ID */
+	if ((id & 0xff) == mfr_id)
+		return "vendor table";
+	return "unrecognised table";
 }
 
 static std::string human_size(uint64_t bytes)
@@ -263,7 +264,7 @@ static std::string human_size(uint64_t bytes)
 	return buf;
 }
 
-void SFDP::display() const
+void SFDP::display(uint8_t mfr_id) const
 {
 	if (!_valid) {
 		printf("SFDP              : not supported\n");
@@ -273,7 +274,7 @@ void SFDP::display() const
 	for (const auto &h : _headers)
 		printf("  table 0x%04x v%u.%u %3u DWORDs @ 0x%06x : %s\n",
 				h.id, h.major, h.minor, h.length, h.ptp,
-				table_name(h.id).c_str());
+				table_name(h.id, mfr_id).c_str());
 	if (!has_bfpt()) {
 		printf("BFPT              : missing or truncated\n");
 		return;
