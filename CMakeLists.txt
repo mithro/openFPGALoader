@@ -337,6 +337,7 @@ endif()
 list(APPEND OPENFPGALOADER_SOURCE
 	src/bpiFlash.cpp
 	src/spiFlash.cpp
+	src/spiFlashSfdp.cpp
 	src/spiInterface.cpp
 	src/epcq.cpp
 	src/jtag.cpp
@@ -348,6 +349,7 @@ list(APPEND OPENFPGALOADER_HEADERS
 	src/jtagInterface.hpp
 	src/spiFlash.hpp
 	src/spiFlashdb.hpp
+	src/spiFlashSfdp.hpp
 	src/epcq.hpp
 	src/spiInterface.hpp
 )
