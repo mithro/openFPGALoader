@@ -678,7 +678,11 @@ int main(int argc, char **argv)
 
 	/* detect/display flash */
 	if (args.detect_flash != 0) {
-		fpga->detect_flash(args.flash_info);
+		if (!fpga->detect_flash(args.flash_info)) {
+			delete(fpga);
+			delete(jtag);
+			return EXIT_FAILURE;
+		}
 	}
 
 	if (args.prg_type == Device::RD_FLASH) {
@@ -809,8 +813,10 @@ int spi_comm(struct arguments args, const cable_t &cable,
 		} else if ((args.prg_type == Device::WR_FLASH ||
 					args.prg_type == Device::WR_SRAM) ||
 					!args.bit_file.empty() || !args.file_type.empty()) {
-			if (args.detect_flash)
-				target->detect_flash(args.flash_info);
+			if (args.detect_flash) {
+				if (!target->detect_flash(args.flash_info))
+					spi_ret = EXIT_FAILURE;
+			}
 			else
 				target->program(args.offset, args.unprotect_flash);
 		}
