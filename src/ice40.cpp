@@ -148,7 +148,7 @@ void Ice40::program(unsigned int offset, bool unprotect_flash)
 	post_flash_access();
 }
 
-bool Ice40::detect_flash()
+bool Ice40::detect_flash(bool full_info)
 {
 	/* prepare SPI access */
 	prepare_flash_access();
@@ -156,6 +156,8 @@ bool Ice40::detect_flash()
 	try {
 		SPIFlash flash(reinterpret_cast<SPIInterface *>(_spi), false, _verbose_level);
 		flash.read_id();
+		if (full_info)
+			flash.display_info();
 		flash.display_status_reg();
 	} catch (std::exception &e) {
 		printError("Fail");
