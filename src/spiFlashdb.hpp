@@ -39,7 +39,7 @@ typedef struct {
 
 static std::map <uint32_t, flash_t> flash_list = {
 	{0x010216, {
-		.manufacturer = "spansion",
+		.manufacturer = "Spansion",
 		.model = "S25FL064P / EPCS64",
 		.nr_sector = 128,
 		.sector_erase = true,
@@ -56,7 +56,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 	}},
 	{0x010219, {
 		/* https://www.mouser.fr/datasheet/2/196/Infineon_S25FL128SS25FL256S_128_Mb__16_MB_256_Mb__-3363490.pdf */
-		.manufacturer = "spansion",
+		.manufacturer = "Spansion",
 		.model = "S25FL256S",
 		.nr_sector = 512,
 		.sector_erase = true,
@@ -72,7 +72,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 		.global_lock = false,
 	}},
 	{0x010220, {
-		.manufacturer = "spansion",
+		.manufacturer = "Spansion",
 		.model = "S25FL512S",
 		.nr_sector = 1024,
 		.sector_erase = true,
@@ -88,7 +88,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 		.global_lock = false,
 	}},
 	{0x012018, {
-		.manufacturer = "spansion",
+		.manufacturer = "Spansion",
 		.model = "S25FL128S",
 		.nr_sector = 256,
 		.sector_erase = true,
@@ -105,7 +105,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 	}},
 	{0x016018, {
 		/* https://www.infineon.com/dgdl/Infineon-S25FL128L_S25FL256L_128_Mb_16_MB_256_Mb_32_MB_FL-L_flash_SPI_multi-I_O_3-DataSheet-v13_00-EN.pdf?fileId=8ac78c8c7d0d8da4017d0ed40e335224 */
-		.manufacturer = "spansion",
+		.manufacturer = "Spansion",
 		.model = "S25FL128L",
 		.nr_sector = 256,
 		.sector_erase = true,
@@ -121,7 +121,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 		.global_lock = false,
 	}},
 	{0x016019, {
-		.manufacturer = "spansion",
+		.manufacturer = "Spansion",
 		.model = "S25FL256L",
 		.nr_sector = 512,
 		.sector_erase = true,
@@ -206,7 +206,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 	}},
 	{0x20ba16, {
 		/* https://www.digikey.co.uk/htmldatasheets/production/1283198/0/0/1/N25Q032A-32Mb-1-8V.pdf */
-		.manufacturer = "micron",
+		.manufacturer = "Micron",
 		.model = "N25Q32",
 		.nr_sector = 64,
 		.sector_erase = true,
@@ -226,7 +226,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 		.global_lock = false,
 	}},
 	{0x20ba17, {
-		.manufacturer = "micron",
+		.manufacturer = "Micron",
 		.model = "N25Q64",
 		.nr_sector = 128,
 		.sector_erase = true,
@@ -247,7 +247,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 	}},
 	{0x20ba18, {
 		/* https://media-www.micron.com/-/media/client/global/documents/products/data-sheet/nor-flash/serial-nor/n25q/n25q_128mb_3v_65nm.pdf */
-		.manufacturer = "micron",
+		.manufacturer = "Micron",
 		.model = "N25Q128_3V",
 		.nr_sector = 256,
 		.sector_erase = true,
@@ -268,7 +268,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 	}},
 	{0x20ba19, {
 		/* https://datasheet.octopart.com/N25Q256A13E1241F-Micron-datasheet-11552757.pdf */
-		.manufacturer = "micron",
+		.manufacturer = "Micron",
 		.model = "N25Q256",
 		.nr_sector = 512,
 		.sector_erase = true,
@@ -291,7 +291,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 		/* https://www.micron.com/-/media/client/global/documents/products/data-sheet/nor-flash/serial-nor/n25q/n25q_128mb_1_8v_65nm.pdf */
 		/* MT25QU128ABA has the same JEDEC-standard signature: https://media-www.micron.com/-/media/client/global/documents/products/data-sheet/nor-flash/serial-nor/mt25q/die-rev-a/mt25q_qlhs_u_128_aba_0.pdf */
 		/* Differences: https://media-www.micron.com/-/media/client/global/documents/products/technical-note/nor-flash/tn2501_migrating_n25q_to_mt25ql.pdf */
-		.manufacturer = "micron",
+		.manufacturer = "Micron",
 		.model = "MT25/N25Q128_1_8V",
 		.nr_sector = 256,
 		.sector_erase = true,
@@ -307,7 +307,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 		.global_lock = false,
 	}},
 	{0x20bb19, {
-		.manufacturer = "micron",
+		.manufacturer = "Micron",
 		.model = "N25Q256A",
 		.nr_sector = 512,
 		.sector_erase = true,
@@ -323,7 +323,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 		.global_lock = false,
 	}},
 	{0x20bb21, {
-		.manufacturer = "micron",
+		.manufacturer = "Micron",
 		.model = "MT25QU01G",
 		.nr_sector = 2048,
 		.sector_erase = true,
@@ -339,7 +339,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 		.global_lock = false,
 	}},
 	{0x20bb22, {
-		.manufacturer = "micron",
+		.manufacturer = "Micron",
 		.model = "MT25QU02G",
 		.nr_sector = 4096,
 		.sector_erase = true,
@@ -436,7 +436,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 		.global_lock = false,
 	}},
 	{0xbf258d, {
-		.manufacturer = "microchip",
+		.manufacturer = "Microchip",
 		.model = "SST25VF040B",
 		.nr_sector = 8,
 		.sector_erase = true,
@@ -452,7 +452,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 		.global_lock = false,
 	}},
 	{0xbf2642, {
-		.manufacturer = "microchip",
+		.manufacturer = "Microchip",
 		.model = "SST26VF032B",
 		.nr_sector = 64,
 		.sector_erase = false,
@@ -468,7 +468,7 @@ static std::map <uint32_t, flash_t> flash_list = {
 		.global_lock = true,
 	}},
 	{0xbf2643, {
-		.manufacturer = "microchip",
+		.manufacturer = "Microchip",
 		.model = "SST26VF064B",
 		.nr_sector = 128,
 		.sector_erase = true,
