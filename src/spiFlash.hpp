@@ -134,6 +134,8 @@ class SPIFlash {
 		/*!
 		 * \brief display complete flash information: manufacturer,
 		 *        part, size, unique ID and SFDP content (read modes, ...)
+		 * \throw std::runtime_error when the JEDEC ID is not a valid
+		 *        (JEP106 parity) or stable one: nothing is displayed
 		 */
 		void display_info();
 		/*!

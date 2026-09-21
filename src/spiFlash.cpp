@@ -797,6 +797,30 @@ void SPIFlash::display_info()
 	const uint8_t mem_type = (_jedec_id >> 16) & 0xff;
 	const uint8_t capacity = (_jedec_id >> 8) & 0xff;
 
+	/* this output identifies a part: refuse to report an ID that is not
+	 * a real one (ie read without a working SPI bridge)
+	 * JEP106: 7 data bits + 1 odd parity bit
+	 */
+	int ones = 0;
+	for (int i = 0; i < 8; i++)
+		ones += (mfr >> i) & 0x01;
+	if ((ones & 0x01) == 0) {
+		char msg[128];
+		snprintf(msg, sizeof(msg), "Invalid JEDEC ID 0x%06x: manufacturer "
+				"0x%02x fails JEP106 odd parity", _jedec_id >> 8, mfr);
+		throw std::runtime_error(msg);
+	}
+	/* a second read must give the same ID */
+	uint8_t rx[3];
+	_spi->spi_put(0x9F, NULL, rx, 3);
+	const uint32_t id2 = (rx[0] << 16) | (rx[1] << 8) | rx[2];
+	if (id2 != (_jedec_id >> 8)) {
+		char msg[128];
+		snprintf(msg, sizeof(msg), "Unstable JEDEC ID: 0x%06x then 0x%06x",
+				_jedec_id >> 8, id2);
+		throw std::runtime_error(msg);
+	}
+
 	/* SFDP: failure is not an error (old parts) */
 	SFDP sfdp;
 	try {
