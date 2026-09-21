@@ -90,7 +90,7 @@ Display detailed SPI flash information
 
 * manufacturer, part name and size (from the internal database, SFDP or the JEDEC ID),
 * factory programmed unique ID / serial number when the manufacturer provides one
-  (Winbond, GigaDevice, ISSI, Puya, Micron N25Q/MT25Q, Spansion S25FL128S/256S,
+  (Winbond, GigaDevice, ISSI, Puya, Micron N25Q/MT25Q, Spansion S25FL127S/128S/256S,
   Infineon S25FL-L, SST26, and Macronix when its secured OTP holds a factory
   programmed ESN: most Macronix parts ship without one, and the report then
   says so, from the security register),

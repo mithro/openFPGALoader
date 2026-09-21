@@ -89,7 +89,8 @@ static std::map <uint32_t, flash_t> flash_list = {
 	}},
 	{0x012018, {
 		.manufacturer = "Spansion",
-		.model = "S25FL128S",
+		/* same JEDEC ID: S25FL128S (no SFDP) and S25FL127S (SFDP) */
+		.model = "S25FL128S/S25FL127S",
 		.nr_sector = 256,
 		.sector_erase = true,
 		.subsector_erase = false,
