@@ -215,6 +215,10 @@ std::string SFDP::quad_enable_req() const
 
 std::vector<sfdp_4b_instr_t> SFDP::read_4b_instr() const
 {
+	/* JESD216B bits only, as used by Linux spi-nor: bits 16 and up are
+	 * reserved there and reserved SFDP bits read as 1 (a quad
+	 * S25FL-S part reports them set)
+	 */
 	static const struct { int bit; const char *name; uint8_t op; } list[] = {
 		{0,  "1-1-1 read",      0x13},
 		{1,  "1-1-1 fast read", 0x0C},
@@ -222,8 +226,6 @@ std::vector<sfdp_4b_instr_t> SFDP::read_4b_instr() const
 		{3,  "1-2-2 fast read", 0xBC},
 		{4,  "1-1-4 fast read", 0x6C},
 		{5,  "1-4-4 fast read", 0xEC},
-		{20, "1-1-8 fast read", 0x7C},
-		{21, "1-8-8 fast read", 0xCC},
 		{13, "1-1-1 DTR read",  0x0E},
 		{14, "1-2-2 DTR read",  0xBE},
 		{15, "1-4-4 DTR read",  0xEE},
