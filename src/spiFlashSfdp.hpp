@@ -84,11 +84,16 @@ class SFDP {
 		std::vector<sfdp_4b_instr_t> read_4b_instr() const;
 		bool has_4bait() const { return !_4bait.empty(); }
 
-		/* human readable name of a parameter table ID */
-		static std::string table_name(uint16_t id);
+		/*!
+		 * \brief human readable name of a parameter table ID
+		 * \param[in] id: (MSB << 8) | LSB
+		 * \param[in] mfr_id: flash JEDEC manufacturer ID: a table whose
+		 *            LSB is this ID is a vendor table
+		 */
+		static std::string table_name(uint16_t id, uint8_t mfr_id);
 
 		/* display everything on stdout */
-		void display() const;
+		void display(uint8_t mfr_id) const;
 
 	private:
 		uint32_t dw(uint8_t index) const {  // 1-based as in JESD216

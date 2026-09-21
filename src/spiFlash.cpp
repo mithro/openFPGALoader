@@ -857,7 +857,7 @@ void SPIFlash::display_info()
 				"this manufacturer/part)\n");
 	}
 
-	sfdp.display();
+	sfdp.display(mfr);
 	printf("\n");
 }
 
