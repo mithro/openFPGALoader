@@ -806,8 +806,8 @@ SPIFlash::uid_state_t SPIFlash::read_unique_id(std::vector<uint8_t> &uid,
 				/* Spansion S25FL256S / S25FL128S: OTP bytes 0x0-0xF hold
 				 * a factory programmed 128-bit random number
 				 * (S25FL128S/256S datasheet 9.1.3), read with OTPR:
-				 * 3 addr + 1 dummy (10.7.2).
-				 * 0x012018 is also S25FL127S: not checked against its datasheet
+				 * 3 addr + 1 dummy (10.7.2). Same for the S25FL127S, which
+				 * shares 0x012018 (S25FL127S datasheet 8.1.3 and 9.7.2).
 				 */
 				cmd = FLASH_ROTP; skip = 4; uid_len = 16;
 			} else {
