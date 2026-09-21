@@ -117,7 +117,7 @@ file and a zero exit status mean the content was read:
 
     {"format": "openFPGALoader-flash-info", "version": 1, "flashes": [
       {"jedec_id": "0x010219", "manufacturer_id": "0x01", "memory_type": "0x02",
-       "capacity": "0x19", "manufacturer": "spansion",
+       "capacity": "0x19", "manufacturer": "Spansion",
        "manufacturer_jep106": "Spansion / Cypress / Infineon",
        "part": "S25FL256S", "size_bytes": 33554432, "size_source": "database",
        "unique_id": {"state": "read", "value": "e2789916a0809a22bbc76634c1bf53ed",
