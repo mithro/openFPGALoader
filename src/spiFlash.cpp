@@ -714,13 +714,17 @@ bool SPIFlash::read_sfdp(uint32_t addr, uint8_t *data, uint32_t len)
 	return true;
 }
 
-bool SPIFlash::read_unique_id(std::vector<uint8_t> &uid, std::string &method)
+SPIFlash::uid_state_t SPIFlash::read_unique_id(std::vector<uint8_t> &uid,
+		uint8_t &opcode)
 {
 	const uint8_t mfr = (_jedec_id >> 24) & 0xff;
 	const uint8_t mem_type = (_jedec_id >> 16) & 0xff;
 	uint8_t cmd;
 	uint32_t skip;     /* address + dummy Bytes sent before the ID */
 	uint32_t uid_len;
+
+	opcode = 0;
+	uid.clear();
 
 	/* only read-only commands, and only when the vendor/family is known:
 	 * the same opcode may have another meaning on other devices
@@ -739,7 +743,7 @@ bool SPIFlash::read_unique_id(std::vector<uint8_t> &uid, std::string &method)
 			 * length (0x10), bytes 6-19: 14 Bytes UID
 			 */
 			if (mem_type != 0xBA && mem_type != 0xBB)
-				return false;
+				return UID_NONE;
 			cmd = 0x9F; skip = 6; uid_len = 14;
 			break;
 		case 0x01:
@@ -756,29 +760,33 @@ bool SPIFlash::read_unique_id(std::vector<uint8_t> &uid, std::string &method)
 				 */
 				cmd = FLASH_ROTP; skip = 4; uid_len = 16;
 			} else {
-				return false;
+				return UID_NONE;
 			}
 			break;
 		case 0xBF:  /* SST26: Security ID 0x88, 2 addr + 1 dummy, 64 bits */
 			if (mem_type != 0x26)
-				return false;
+				return UID_NONE;
 			cmd = FLASH_RSID; skip = 3; uid_len = 8;
 			break;
 		default:
-			return false;
+			return UID_NONE;
 	}
 
+	/* from here, the part has a unique ID: a failure is an error, never
+	 * "no unique ID"
+	 */
+	opcode = cmd;
 	std::vector<uint8_t> tx(skip + uid_len, 0), rx(skip + uid_len, 0);
 	if (_spi->spi_put(cmd, tx.data(), rx.data(), skip + uid_len) != 0)
-		return false;
-	if (cmd == 0x9F && rx[3] != 0x10)
-		return false;
+		throw std::runtime_error("Unique ID read failed");
+	if (cmd == 0x9F && rx[3] != 0x10) {
+		char msg[96];
+		snprintf(msg, sizeof(msg), "Unique ID read failed: unexpected RDID "
+				"extended length 0x%02x (expected 0x10)", rx[3]);
+		throw std::runtime_error(msg);
+	}
 
 	uid.assign(rx.begin() + skip, rx.end());
-
-	char buf[64];
-	snprintf(buf, sizeof(buf), "opcode 0x%02X, %u bits", cmd, uid_len * 8);
-	method = buf;
 
 	/* blank (all 0x00 or all 0xFF): not a real ID */
 	bool all_00 = true, all_ff = true;
@@ -786,7 +794,7 @@ bool SPIFlash::read_unique_id(std::vector<uint8_t> &uid, std::string &method)
 		all_00 &= (b == 0x00);
 		all_ff &= (b == 0xff);
 	}
-	return !(all_00 || all_ff);
+	return (all_00 || all_ff) ? UID_BLANK : UID_READ;
 }
 
 void SPIFlash::display_info()
@@ -865,15 +873,20 @@ void SPIFlash::display_info()
 				" Byte) differs from database");
 
 	std::vector<uint8_t> uid;
-	std::string method;
-	if (read_unique_id(uid, method)) {
-		printf("Unique ID         : ");
-		for (auto b : uid)
-			printf("%02x", b);
-		printf(" (%s)\n", method.c_str());
-	} else if (!method.empty()) {
-		printf("Unique ID         : blank (%s returned all 0x00/0xFF)\n",
-				method.c_str());
+	uint8_t uid_opcode;
+	const uid_state_t uid_state = read_unique_id(uid, uid_opcode);
+	std::string uid_hex;
+	for (auto b : uid) {
+		char buf[4];
+		snprintf(buf, sizeof(buf), "%02x", b);
+		uid_hex += buf;
+	}
+	if (uid_state == UID_READ) {
+		printf("Unique ID         : %s (opcode 0x%02X, %zu bits)\n",
+				uid_hex.c_str(), uid_opcode, uid.size() * 8);
+	} else if (uid_state == UID_BLANK) {
+		printf("Unique ID         : blank (opcode 0x%02X, %zu bits returned "
+				"all 0x00/0xFF)\n", uid_opcode, uid.size() * 8);
 	} else {
 		printf("Unique ID         : not available (unsupported for "
 				"this manufacturer/part)\n");
@@ -881,6 +894,7 @@ void SPIFlash::display_info()
 
 	sfdp.display(mfr);
 	printf("\n");
+
 }
 
 void SPIFlash::display_status_reg(uint8_t reg)

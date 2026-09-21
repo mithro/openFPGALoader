@@ -146,13 +146,20 @@ class SPIFlash {
 		 * \return false when read fails
 		 */
 		bool read_sfdp(uint32_t addr, uint8_t *data, uint32_t len);
+		/* unique ID read result */
+		typedef enum {
+			UID_NONE  = 0, /**< no known unique ID command for this part */
+			UID_BLANK = 1, /**< read, but all 0x00 or all 0xFF */
+			UID_READ  = 2, /**< read */
+		} uid_state_t;
 		/*!
 		 * \brief read factory programmed unique ID (vendor specific)
-		 * \param[out] uid: unique ID
-		 * \param[out] method: command used to read uid
-		 * \return false when unsupported by the vendor/part or blank
+		 * \param[out] uid: unique ID (as read, also when blank)
+		 * \param[out] opcode: command used to read uid (0 when UID_NONE)
+		 * \return UID_NONE, UID_BLANK or UID_READ
+		 * \throw std::runtime_error when the read itself fails
 		 */
-		bool read_unique_id(std::vector<uint8_t> &uid, std::string &method);
+		uid_state_t read_unique_id(std::vector<uint8_t> &uid, uint8_t &opcode);
 		/*!
 		 * \brief return manufacturer name based on JEDEC manufacturer ID
 		 */
