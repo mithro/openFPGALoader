@@ -56,6 +56,11 @@
 #define FLASH_RDSFDP   0x5A
 /* read security ID (SST26): 2B addr + 8 clk cycle */
 #define FLASH_RSID     0x88
+/* Macronix secured OTP: read security register, enter/exit secured OTP */
+#define MX_RDSCUR      0x2B
+#	define MX_RDSCUR_FACTORY_LOCK (0x01)
+#define MX_ENSO        0xB1
+#define MX_EXSO        0xC1
 /* block (32Kb) erase */
 #define FLASH_BE32     0x52
 /* block (32Kb) erase with 4-byte address */
@@ -716,8 +721,49 @@ bool SPIFlash::read_sfdp(uint32_t addr, uint8_t *data, uint32_t len)
 
 std::vector<std::string> SPIFlash::_info_json_records;
 
+/* Macronix factory ESN: see read_unique_id() */
+SPIFlash::uid_state_t SPIFlash::read_macronix_esn(std::vector<uint8_t> &uid,
+		uint8_t &opcode, std::string &note)
+{
+	uint8_t scur;
+	if (_spi->spi_put(MX_RDSCUR, NULL, &scur, 1) != 0)
+		throw std::runtime_error("Security register read failed");
+	/* all ones: nothing answered (reserved bits are never all set) */
+	if (scur == 0xff)
+		throw std::runtime_error("Security register read failed (0xff)");
+
+	char buf[96];
+	if (!(scur & MX_RDSCUR_FACTORY_LOCK)) {
+		snprintf(buf, sizeof(buf), "no factory ESN: security register "
+				"0x%02x, bit 0 (factory lock) = 0", scur);
+		note = buf;
+		return UID_NONE;
+	}
+
+	/* factory locked: ESN is secured OTP 0x00-0x0F. Always leave the
+	 * secured OTP mode: the main array is not accessible inside it.
+	 */
+	opcode = MX_ENSO;
+	uint8_t tx[3 + 16] = {0}, rx[3 + 16];
+	int ret = _spi->spi_put(MX_ENSO, NULL, NULL, 0);
+	if (ret == 0)
+		ret = _spi->spi_put(FLASH_READ, tx, rx, sizeof(tx));
+	const int ret_exit = _spi->spi_put(MX_EXSO, NULL, NULL, 0);
+	if (ret != 0 || ret_exit != 0)
+		throw std::runtime_error("Secured OTP (ESN) read failed");
+
+	uid.assign(rx + 3, rx + sizeof(rx));
+	note = "factory ESN in secured OTP";
+	bool all_00 = true, all_ff = true;
+	for (auto b : uid) {
+		all_00 &= (b == 0x00);
+		all_ff &= (b == 0xff);
+	}
+	return (all_00 || all_ff) ? UID_BLANK : UID_READ;
+}
+
 SPIFlash::uid_state_t SPIFlash::read_unique_id(std::vector<uint8_t> &uid,
-		uint8_t &opcode)
+		uint8_t &opcode, std::string &note)
 {
 	const uint8_t mfr = (_jedec_id >> 24) & 0xff;
 	const uint8_t mem_type = (_jedec_id >> 16) & 0xff;
@@ -727,6 +773,7 @@ SPIFlash::uid_state_t SPIFlash::read_unique_id(std::vector<uint8_t> &uid,
 
 	opcode = 0;
 	uid.clear();
+	note.clear();
 
 	/* only read-only commands, and only when the vendor/family is known:
 	 * the same opcode may have another meaning on other devices
@@ -765,6 +812,13 @@ SPIFlash::uid_state_t SPIFlash::read_unique_id(std::vector<uint8_t> &uid,
 				return UID_NONE;
 			}
 			break;
+		case 0xC2:
+			/* Macronix: no unique ID command. A 128-bit ESN is only
+			 * programmed in the secured OTP (0x00-0x0F) on "special
+			 * order", then security register bit 0 is set (factory lock)
+			 * (Macronix AN0218, Serial Flash Secured OTP Area Introduction)
+			 */
+			return read_macronix_esn(uid, opcode, note);
 		case 0xBF:  /* SST26: Security ID 0x88, 2 addr + 1 dummy, 64 bits */
 			if (mem_type != 0x26)
 				return UID_NONE;
@@ -876,7 +930,8 @@ void SPIFlash::display_info()
 
 	std::vector<uint8_t> uid;
 	uint8_t uid_opcode;
-	const uid_state_t uid_state = read_unique_id(uid, uid_opcode);
+	std::string uid_note;
+	const uid_state_t uid_state = read_unique_id(uid, uid_opcode, uid_note);
 	std::string uid_hex;
 	for (auto b : uid) {
 		char buf[4];
@@ -889,6 +944,8 @@ void SPIFlash::display_info()
 	} else if (uid_state == UID_BLANK) {
 		printf("Unique ID         : blank (opcode 0x%02X, %zu bits returned "
 				"all 0x00/0xFF)\n", uid_opcode, uid.size() * 8);
+	} else if (!uid_note.empty()) {
+		printf("Unique ID         : not available (%s)\n", uid_note.c_str());
 	} else {
 		printf("Unique ID         : not available (unsupported for "
 				"this manufacturer/part)\n");
@@ -924,7 +981,9 @@ void SPIFlash::display_info()
 		", \"bits\": " + (uid_state == UID_NONE ? std::string("null") :
 				std::to_string(uid.size() * 8)) +
 		", \"opcode\": " + (uid_state == UID_NONE ? std::string("null") :
-				json_hex(uid_opcode, 2)) + "}";
+				json_hex(uid_opcode, 2)) +
+		", \"note\": " + (uid_note.empty() ? std::string("null") :
+				json_string(uid_note)) + "}";
 	j += ", \"sfdp\": " + sfdp.to_json(mfr) + "}";
 	_info_json_records.push_back(j);
 }

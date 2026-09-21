@@ -156,10 +156,13 @@ class SPIFlash {
 		 * \brief read factory programmed unique ID (vendor specific)
 		 * \param[out] uid: unique ID (as read, also when blank)
 		 * \param[out] opcode: command used to read uid (0 when UID_NONE)
+		 * \param[out] note: why there is no unique ID, when known
+		 *             (ie Macronix part without factory ESN), or empty
 		 * \return UID_NONE, UID_BLANK or UID_READ
 		 * \throw std::runtime_error when the read itself fails
 		 */
-		uid_state_t read_unique_id(std::vector<uint8_t> &uid, uint8_t &opcode);
+		uid_state_t read_unique_id(std::vector<uint8_t> &uid, uint8_t &opcode,
+				std::string &note);
 		/*!
 		 * \brief JSON records (one per flash) built by display_info()
 		 *        since the start of the program
@@ -197,6 +200,8 @@ class SPIFlash {
 
 	private:
 		bool prepare_flash(const int base_addr, const int len);
+		uid_state_t read_macronix_esn(std::vector<uint8_t> &uid,
+				uint8_t &opcode, std::string &note);
 
 	public:
 		/*!
