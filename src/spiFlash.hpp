@@ -8,6 +8,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "flashInterface.hpp"
 #include "spiFlashdb.hpp"
@@ -130,6 +131,30 @@ class SPIFlash {
 		void display_status_reg(uint8_t reg);
 		void display_status_reg() {display_status_reg(read_status_reg());}
 		virtual void read_id();
+		/*!
+		 * \brief display complete flash information: manufacturer,
+		 *        part, size, unique ID and SFDP content (read modes, ...)
+		 */
+		void display_info();
+		/*!
+		 * \brief read SFDP (JESD216) area
+		 * \param[in] addr: SFDP address
+		 * \param[out] data: buffer
+		 * \param[in] len: length (in Byte)
+		 * \return false when read fails
+		 */
+		bool read_sfdp(uint32_t addr, uint8_t *data, uint32_t len);
+		/*!
+		 * \brief read factory programmed unique ID (vendor specific)
+		 * \param[out] uid: unique ID
+		 * \param[out] method: command used to read uid
+		 * \return false when unsupported by the vendor/part or blank
+		 */
+		bool read_unique_id(std::vector<uint8_t> &uid, std::string &method);
+		/*!
+		 * \brief return manufacturer name based on JEDEC manufacturer ID
+		 */
+		static std::string manufacturer_name(uint8_t mfr_id);
 		uint16_t readNonVolatileCfgReg();
 		uint16_t readVolatileCfgReg();
 		bool set_quad_bit(bool set_quad);
