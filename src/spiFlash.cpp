@@ -742,10 +742,22 @@ bool SPIFlash::read_unique_id(std::vector<uint8_t> &uid, std::string &method)
 				return false;
 			cmd = 0x9F; skip = 6; uid_len = 14;
 			break;
-		case 0x01:  /* Infineon S25FL-L: RUID 0x4C, 4 dummy, 64 bits */
-			if (mem_type != 0x60)
+		case 0x01:
+			if (mem_type == 0x60) {
+				/* Infineon S25FL-L: RUID 0x4C, 4 dummy, 64 bits */
+				cmd = FLASH_RUID_S25FLL; skip = 4; uid_len = 8;
+			} else if ((_jedec_id >> 8) == 0x010219 ||
+					(_jedec_id >> 8) == 0x012018) {
+				/* Spansion S25FL256S / S25FL128S: OTP bytes 0x0-0xF hold
+				 * a factory programmed 128-bit random number
+				 * (S25FL128S/256S datasheet 9.1.3), read with OTPR:
+				 * 3 addr + 1 dummy (10.7.2).
+				 * 0x012018 is also S25FL127S: not checked against its datasheet
+				 */
+				cmd = FLASH_ROTP; skip = 4; uid_len = 16;
+			} else {
 				return false;
-			cmd = FLASH_RUID_S25FLL; skip = 4; uid_len = 8;
+			}
 			break;
 		case 0xBF:  /* SST26: Security ID 0x88, 2 addr + 1 dummy, 64 bits */
 			if (mem_type != 0x26)
