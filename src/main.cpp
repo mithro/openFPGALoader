@@ -132,6 +132,7 @@ struct arguments {
 	bool read_xadc;
 	std::string read_register;
 	std::string user_flash;
+	bool flash_info;
 };
 
 int run_xvc_server(const struct arguments &args, const cable_t &cable,
@@ -172,7 +173,8 @@ int main(int argc, char **argv)
 			false, 3721, "-",
 			"", false, {},  // mcufw conmcu, user_misc_dev_list
 			false, false, "", // read_dna, read_xadc, read_register
-			"" // user_flash
+			"", // user_flash
+			false // flash_info
 	};
 	/* parse arguments */
 	int ret = parse_opt(argc, argv, &args, &pins_config);
@@ -676,7 +678,7 @@ int main(int argc, char **argv)
 
 	/* detect/display flash */
 	if (args.detect_flash != 0) {
-		fpga->detect_flash();
+		fpga->detect_flash(args.flash_info);
 	}
 
 	if (args.prg_type == Device::RD_FLASH) {
@@ -808,7 +810,7 @@ int spi_comm(struct arguments args, const cable_t &cable,
 					args.prg_type == Device::WR_SRAM) ||
 					!args.bit_file.empty() || !args.file_type.empty()) {
 			if (args.detect_flash)
-				target->detect_flash();
+				target->detect_flash(args.flash_info);
 			else
 				target->program(args.offset, args.unprotect_flash);
 		}
@@ -829,6 +831,8 @@ int spi_comm(struct arguments args, const cable_t &cable,
 		}
 
 		SPIFlash flash((FlashInterface *)spi, args.unprotect_flash, args.verbose);
+		if (args.flash_info)
+			flash.display_info();
 		flash.display_status_reg();
 
 		if (args.prg_type != Device::RD_FLASH &&
@@ -978,6 +982,9 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 			("passive-serial", "USB-Blaster passive serial mode",
 				cxxopts::value<bool>(args->passive_serial))
 			("dump-flash",  "Dump flash mode")
+			("flash-info",  "display detailed SPI flash information "
+				"(manufacturer, part, size, unique ID, SFDP read modes)",
+				cxxopts::value<bool>(args->flash_info))
 			("bulk-erase",   "Bulk erase flash",
 				cxxopts::value<bool>(args->bulk_erase_flash))
 			("enable-quad",   "Enable quad mode for SPI Flash",
@@ -1254,7 +1261,8 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 				 !args->protect_flash &&
 				 !args->unprotect_flash &&
 				 !args->bulk_erase_flash &&
-				 !args->detect
+				 !args->detect &&
+				 !args->flash_info
 				) {
 				printError("Error: secondary bitfile not specified");
 				std::cout << options.help() << std::endl;
@@ -1272,6 +1280,7 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 			args->mcufw.empty() &&
 			!args->is_list_command &&
 			!args->detect &&
+			!args->flash_info &&
 			!args->protect_flash &&
 			!args->unprotect_flash &&
 			!args->enable_quad &&
@@ -1286,6 +1295,12 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 			printError("Error: bitfile not specified");
 			std::cout << options.help() << std::endl;
 			return -1;
+		}
+
+		// --flash-info: same as --detect -f with more details
+		if (args->flash_info) {
+			args->detect = true;
+			args->prg_type = Device::WR_FLASH;
 		}
 
 		// user ask detect with flash set

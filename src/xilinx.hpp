@@ -61,7 +61,7 @@ class Xilinx: public Device, FlashInterface {
 		/*!
 		 * \brief display SPI flash ID and status register
 		 */
-		bool detect_flash() override;
+		bool detect_flash(bool full_info) override;
 		/*!
 		 * \brief protect SPI flash blocks
 		 */

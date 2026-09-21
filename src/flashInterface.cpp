@@ -23,7 +23,7 @@ FlashInterface::FlashInterface(const std::string &filename, int8_t verbose,
 {}
 
 /* spiFlash generic acces */
-bool FlashInterface::detect_flash()
+bool FlashInterface::detect_flash(bool full_info)
 {
 	bool ret = true;
 
@@ -39,6 +39,8 @@ bool FlashInterface::detect_flash()
 	try {
 		// instanciate call (display flash ID is automatic)
 		SPIFlash flash(this, false, _spif_verbose);
+		if (full_info)
+			flash.display_info();
 		// display status register
 		flash.display_status_reg();
 
