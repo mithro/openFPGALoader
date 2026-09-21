@@ -714,6 +714,8 @@ bool SPIFlash::read_sfdp(uint32_t addr, uint8_t *data, uint32_t len)
 	return true;
 }
 
+std::vector<std::string> SPIFlash::_info_json_records;
+
 SPIFlash::uid_state_t SPIFlash::read_unique_id(std::vector<uint8_t> &uid,
 		uint8_t &opcode)
 {
@@ -895,6 +897,36 @@ void SPIFlash::display_info()
 	sfdp.display(mfr);
 	printf("\n");
 
+	/* machine readable record (see --flash-info-json) */
+	static const char *uid_states[] = {"none", "blank", "read"};
+	const std::string jep106 = manufacturer_name(mfr);
+	std::string j = "{\"jedec_id\": " + json_hex(_jedec_id >> 8, 6) +
+		", \"manufacturer_id\": " + json_hex(mfr, 2) +
+		", \"memory_type\": " + json_hex(mem_type, 2) +
+		", \"capacity\": " + json_hex(capacity, 2) +
+		", \"manufacturer\": " + (_flash_model ?
+			json_string(_flash_model->manufacturer) : std::string("null")) +
+		", \"manufacturer_jep106\": " + (jep106 == "unknown" ?
+			std::string("null") : json_string(jep106)) +
+		", \"part\": " + (_flash_model ?
+			json_string(_flash_model->model) : std::string("null"));
+	static const char *size_srcs[] = {"database", "sfdp", "jedec_capacity"};
+	if (size)
+		j += ", \"size_bytes\": " + std::to_string(size) +
+			", \"size_source\": " + json_string(
+				size_src == "database" ? size_srcs[0] :
+				size_src == "SFDP" ? size_srcs[1] : size_srcs[2]);
+	else
+		j += ", \"size_bytes\": null, \"size_source\": null";
+	j += std::string(", \"unique_id\": {\"state\": \"") + uid_states[uid_state] +
+		"\", \"value\": " + (uid_state == UID_READ ? json_string(uid_hex) :
+				std::string("null")) +
+		", \"bits\": " + (uid_state == UID_NONE ? std::string("null") :
+				std::to_string(uid.size() * 8)) +
+		", \"opcode\": " + (uid_state == UID_NONE ? std::string("null") :
+				json_hex(uid_opcode, 2)) + "}";
+	j += ", \"sfdp\": " + sfdp.to_json(mfr) + "}";
+	_info_json_records.push_back(j);
 }
 
 void SPIFlash::display_status_reg(uint8_t reg)
