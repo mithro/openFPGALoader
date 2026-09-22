@@ -117,7 +117,7 @@ file and a zero exit status mean the content was read:
 
 .. code-block:: json
 
-    {"format": "openFPGALoader-flash-info", "version": 1, "flashes": [
+    {"format": "openFPGALoader-flash-info", "version": 2, "flashes": [
       {"jedec_id": "0x010219", "manufacturer_id": "0x01", "memory_type": "0x02",
        "capacity": "0x19", "manufacturer": "Spansion",
        "manufacturer_jep106": "Spansion / Cypress / Infineon",
@@ -177,6 +177,12 @@ consumer should refuse a ``format`` or ``version`` it does not know. New
 fields may be added without a new ``version``: ignore unknown fields. The
 openFPGALoader version string does not tell whether ``--flash-info`` is
 available: check for ``--flash-info-json`` in ``--help`` instead.
+
+Versions:
+
+* ``1``: first version. ``sfdp`` could be ``null`` after a failed SFDP read.
+* ``2``: ``sfdp`` is ``null`` only when the part has no SFDP (a failed read
+  is an error), and ``extended_id`` is added.
 
 .. NOTE::
   On FPGAs where the flash is only reachable through the FPGA (ie Xilinx,
