@@ -128,9 +128,11 @@ file and a zero exit status mean the content was read:
        "sfdp": null}]}
 
 ``flashes`` has one entry per flash (two with ``--target-flash both``).
-``sfdp`` is ``null`` without SFDP, otherwise it holds the tables, ``bfpt``
-(density, address mode, DTR, page size, read modes with opcode and
-mode/dummy clocks, erase types, quad enable) and ``read_4byte``.
+``sfdp`` holds the tables, ``bfpt`` (density, address mode, DTR, page size,
+read modes with opcode and mode/dummy clocks, erase types, quad enable) and
+``read_4byte``. RSFDP (``0x5A``) is always sent, and ``sfdp`` is ``null``
+only when its answer has no ``SFDP`` signature, so the part does not
+implement it. A failed SFDP read is an error: no file is written.
 
 ``unique_id.state`` is one of:
 
