@@ -57,7 +57,8 @@ class SFDP {
 		/*!
 		 * \brief read and parse SFDP structures
 		 * \param[in] rd: SFDP read callback
-		 * \return false when no (valid) SFDP header is found
+		 * \return false when the answer has no SFDP signature (no SFDP)
+		 * \throw std::runtime_error when a read fails
 		 */
 		bool parse(read_fn_t rd);
 

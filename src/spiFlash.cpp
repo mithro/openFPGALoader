@@ -944,14 +944,12 @@ void SPIFlash::display_info()
 		throw std::runtime_error(msg);
 	}
 
-	/* SFDP: failure is not an error (old parts) */
+	/* SFDP: always asked. No SFDP signature in the answer (old parts)
+	 * is not an error, a failed read is
+	 */
 	SFDP sfdp;
-	try {
-		sfdp.parse([this](uint32_t addr, uint8_t *buf, uint32_t len) {
-				return read_sfdp(addr, buf, len);});
-	} catch (std::exception &e) {
-		printWarn(std::string("SFDP read failed: ") + e.what());
-	}
+	sfdp.parse([this](uint32_t addr, uint8_t *buf, uint32_t len) {
+			return read_sfdp(addr, buf, len);});
 
 	printf("\nSPI Flash information\n");
 	printf("JEDEC ID          : 0x%06x (manufacturer 0x%02x, type 0x%02x, "
