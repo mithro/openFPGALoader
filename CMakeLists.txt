@@ -2,7 +2,11 @@ cmake_minimum_required(VERSION 3.10)
 
 # set the project name
 project(openFPGALoader VERSION "1.1.1" LANGUAGES CXX)
-add_definitions(-DVERSION=\"v${PROJECT_VERSION}\")
+# Distributors carrying local patches set this so --Version says which
+# build a bug report comes from, e.g. -DOPENFPGALOADER_VERSION=v1.1.1+distro.3
+set(OPENFPGALOADER_VERSION "v${PROJECT_VERSION}" CACHE STRING
+	"version string reported by --Version")
+add_definitions(-DVERSION=\"${OPENFPGALOADER_VERSION}\")
 
 #if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
 #	set(WINDOWS_CROSSCOMPILE ON)
