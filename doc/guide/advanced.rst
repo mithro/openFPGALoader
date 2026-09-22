@@ -127,12 +127,42 @@ file and a zero exit status mean the content was read:
        "sfdp": null}]}
 
 ``flashes`` has one entry per flash (two with ``--target-flash both``).
-``unique_id.state`` is ``read``, ``blank`` (read, all ``0x00``/``0xFF``) or
-``none`` (no known unique ID command for this part); a failed unique ID read
-is an error. ``unique_id.note`` explains a ``none`` when the reason is known
-(ie a Macronix part without factory ESN), otherwise it is ``null``. ``sfdp`` is ``null`` without SFDP, otherwise it holds the tables,
-``bfpt`` (density, address mode, DTR, page size, read modes with opcode and
+``sfdp`` is ``null`` without SFDP, otherwise it holds the tables, ``bfpt``
+(density, address mode, DTR, page size, read modes with opcode and
 mode/dummy clocks, erase types, quad enable) and ``read_4byte``.
+
+``unique_id.state`` is one of:
+
+* ``read``: a factory programmed unique ID was read (``value``, ``bits``,
+  ``opcode``).
+* ``blank``: the part has a known unique ID command, the read succeeded
+  but returned all ``0x00`` or all ``0xFF``: this is not an ID.
+* ``none`` with a ``note``: the part has no factory unique ID, as read from
+  the chip itself (ie a Macronix part whose security register says no ESN
+  was programmed); ``note`` gives the register value.
+* ``none`` with a ``null`` note: openFPGALoader knows no unique ID command
+  for this part (unknown manufacturer or family). This says nothing about
+  the silicon, which may have one.
+
+A failed unique ID read is an error, never a ``state``: no file is written.
+
+``part`` and ``size_bytes`` with ``"size_source": "database"`` come from the
+internal database for this JEDEC ID, not from the chip: several parts may
+share one ID (ie ``0xc22017`` is used by more than one Macronix 64 Mbit part).
+The values read from the chip are the JEDEC ID fields, ``unique_id`` and
+``sfdp``.
+
+``format`` is always ``openFPGALoader-flash-info``, and ``version`` is
+increased whenever a field is renamed, removed or changes meaning, so a
+consumer should refuse a ``format`` or ``version`` it does not know. The
+openFPGALoader version string does not tell whether ``--flash-info`` is
+available: check for ``--flash-info-json`` in ``--help`` instead.
+
+.. NOTE::
+  On FPGAs where the flash is only reachable through the FPGA (ie Xilinx,
+  through a *spiOverJtag* bridge), every ``--flash-info`` read, including the
+  JEDEC ID, replaces the running design with the bridge, then the FPGA is
+  reloaded from flash.
 
 Detect/read/write on primary/secondary flash memories
 =====================================================
