@@ -164,6 +164,18 @@ class SPIFlash {
 		uid_state_t read_unique_id(std::vector<uint8_t> &uid, uint8_t &opcode,
 				std::string &note);
 		/*!
+		 * \brief read the RDID (0x9F) bytes following the 3-byte JEDEC ID,
+		 *        for the families that define them: Micron N25Q/MT25Q
+		 *        (extended device ID) and Spansion/Cypress/Infineon
+		 *        (ID-CFI length, sector architecture, family)
+		 * \param[out] ext: RDID bytes 4-6 (empty when not defined)
+		 * \param[out] desc: their meaning, for display
+		 * \return false when the part defines no extended ID
+		 * \throw std::runtime_error when the read fails or the JEDEC ID
+		 *        read with it is not the same
+		 */
+		bool read_extended_id(std::vector<uint8_t> &ext, std::string &desc);
+		/*!
 		 * \brief JSON records (one per flash) built by display_info()
 		 *        since the start of the program
 		 */

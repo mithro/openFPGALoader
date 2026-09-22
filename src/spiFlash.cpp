@@ -853,6 +853,67 @@ SPIFlash::uid_state_t SPIFlash::read_unique_id(std::vector<uint8_t> &uid,
 	return (all_00 || all_ff) ? UID_BLANK : UID_READ;
 }
 
+bool SPIFlash::read_extended_id(std::vector<uint8_t> &ext, std::string &desc)
+{
+	const uint8_t mfr = (_jedec_id >> 24) & 0xff;
+	const uint8_t mem_type = (_jedec_id >> 16) & 0xff;
+
+	ext.clear();
+	desc.clear();
+
+	/* only families whose RDID defines the bytes after the JEDEC ID (as
+	 * Linux spi-nor keys parts on them): other parts leave them undefined
+	 */
+	/* Micron N25Q / MT25Q */
+	const bool micron = mfr == 0x20 && (mem_type == 0xBA || mem_type == 0xBB);
+	/* Spansion S25FL-S/FS-S/FL-P/SL (not S25FL-L, type 0x60) and
+	 * Infineon SEMPER S25HL-T/HS-T/FS-T
+	 */
+	const bool spansion = (mfr == 0x01 && (mem_type == 0x02 || mem_type == 0x20)) ||
+		mfr == 0x34;
+	if (!micron && !spansion)
+		return false;
+
+	uint8_t rx[6];
+	if (_spi->spi_put(0x9F, NULL, rx, sizeof(rx)) != 0)
+		throw std::runtime_error("Extended ID read failed");
+	const uint32_t id = (rx[0] << 16) | (rx[1] << 8) | rx[2];
+	if (id != (_jedec_id >> 8)) {
+		char msg[128];
+		snprintf(msg, sizeof(msg), "Unstable JEDEC ID: 0x%06x then 0x%06x "
+				"(extended ID read)", _jedec_id >> 8, id);
+		throw std::runtime_error(msg);
+	}
+	ext.assign(rx + 3, rx + 6);
+
+	char buf[160];
+	if (micron) {
+		/* byte 4: length of the data that follows (0x10: extended device
+		 * ID then unique ID), bytes 5-6: extended device ID
+		 * (ie 0x10 0x44 0x00 for MT25Q "a" parts in Linux spi-nor)
+		 */
+		snprintf(buf, sizeof(buf), "length 0x%02x, extended device ID 0x%02x%02x",
+				rx[3], rx[4], rx[5]);
+	} else if (mfr == 0x01 && rx[3] == 0x4D) {
+		/* S25FL-S / S25FS-S: byte 4 ID-CFI length, byte 5 sector
+		 * architecture, byte 6 family (Linux spi-nor s25fl128s0 = 4d 00 80
+		 * with 256 KiB sectors, s25fl128s1 = 4d 01 80 with 64 KiB sectors,
+		 * s25fs128s1 = 4d 01 81)
+		 */
+		const char *arch = rx[4] == 0x00 ? "uniform 256 KiB sectors" :
+			rx[4] == 0x01 ? "4 KiB parameter + 64 KiB sectors" : "unknown";
+		const char *family = rx[5] == 0x80 ? "FL-S" :
+			rx[5] == 0x81 ? "FS-S" : "unknown";
+		snprintf(buf, sizeof(buf), "ID-CFI length 0x4d, sector architecture "
+				"0x%02x (%s), family 0x%02x (%s)", rx[4], arch, rx[5], family);
+	} else {
+		snprintf(buf, sizeof(buf), "bytes 4-6 0x%02x 0x%02x 0x%02x",
+				rx[3], rx[4], rx[5]);
+	}
+	desc = buf;
+	return true;
+}
+
 void SPIFlash::display_info()
 {
 	const uint8_t mfr = (_jedec_id >> 24) & 0xff;
@@ -928,6 +989,20 @@ void SPIFlash::display_info()
 		printWarn("SFDP size (" + std::to_string(sfdp.density_bits() / 8) +
 				" Byte) differs from database");
 
+	std::vector<uint8_t> ext;
+	std::string ext_desc, ext_hex;
+	if (read_extended_id(ext, ext_desc)) {
+		for (auto b : ext) {
+			char buf[4];
+			snprintf(buf, sizeof(buf), "%02x", b);
+			ext_hex += buf;
+		}
+		printf("Extended ID       : 0x%s (RDID bytes 4-6: %s)\n",
+				ext_hex.c_str(), ext_desc.c_str());
+	} else {
+		printf("Extended ID       : none (not defined for this manufacturer/part)\n");
+	}
+
 	std::vector<uint8_t> uid;
 	uint8_t uid_opcode;
 	std::string uid_note;
@@ -966,7 +1041,9 @@ void SPIFlash::display_info()
 		", \"manufacturer_jep106\": " + (jep106 == "unknown" ?
 			std::string("null") : json_string(jep106)) +
 		", \"part\": " + (_flash_model ?
-			json_string(_flash_model->model) : std::string("null"));
+			json_string(_flash_model->model) : std::string("null")) +
+		", \"extended_id\": " + (ext_hex.empty() ? std::string("null") :
+			json_string("0x" + ext_hex));
 	static const char *size_srcs[] = {"database", "sfdp", "jedec_capacity"};
 	if (size)
 		j += ", \"size_bytes\": " + std::to_string(size) +
