@@ -60,6 +60,14 @@ set(BLASTERII_PATH           "" CACHE STRING "usbBlasterII firmware directory")
 set(ISE_PATH "/opt/Xilinx/14.7" CACHE STRING "ise root directory (default: /opt/Xilinx/14.7)")
 set(VIVADO_PATH              "" CACHE STRING "Vivado root directory (something like /opt/Xilinx/Vivado/VERSION)")
 
+# RP1 PIO JTAG (librp1jtag) is only available on Linux (Raspberry Pi 5).
+# Off by default: it needs librp1jtag, which is not in any distribution.
+if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+	option(ENABLE_RP1_PIO "enable Raspberry Pi 5 RP1 PIO JTAG driver (requires librp1jtag)" OFF)
+else()
+	set(ENABLE_RP1_PIO OFF)
+endif()
+
 # Libgpiod is only available on Linux OS.
 if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 	option(ENABLE_LIBGPIOD "enable libgpiod bitbang driver (requires libgpiod)" ${ENABLE_CABLE_ALL})
@@ -574,6 +582,12 @@ list(APPEND OPENFPGALOADER_SOURCE  src/jlink.cpp)
 list(APPEND OPENFPGALOADER_HEADERS src/jlink.hpp)
 endif()
 
+# RP1 PIO JTAG support
+if (ENABLE_RP1_PIO)
+list(APPEND OPENFPGALOADER_SOURCE  src/rp1PioJtag.cpp)
+list(APPEND OPENFPGALOADER_HEADERS src/rp1PioJtag.hpp)
+endif()
+
 # libGPIOD support
 if (ENABLE_LIBGPIOD)
 list(APPEND OPENFPGALOADER_SOURCE  src/libgpiodJtagBitbang.cpp)
@@ -789,6 +803,23 @@ if (ENABLE_LIBGPIOD)
 		message("libgpiod v1 support enabled")
 	endif()
 endif(ENABLE_LIBGPIOD)
+
+# RP1 PIO JTAG support (librp1jtag, found through its rp1jtag.pc).
+if (ENABLE_RP1_PIO)
+	pkg_check_modules(RP1JTAG REQUIRED rp1jtag)
+	include_directories(${RP1JTAG_INCLUDE_DIRS})
+	target_link_directories(openFPGALoader PRIVATE ${RP1JTAG_LIBRARY_DIRS})
+	target_link_libraries(openFPGALoader ${RP1JTAG_LIBRARIES})
+	# A static librp1jtag needs its PIOLib backend linked explicitly.
+	find_library(PIOLIB_LIBRARY pio HINTS ${RP1JTAG_LIBRARY_DIRS})
+	if (PIOLIB_LIBRARY)
+		target_link_libraries(openFPGALoader ${PIOLIB_LIBRARY})
+	endif()
+	add_definitions(-DENABLE_RP1_PIO=1)
+	message("RP1 PIO JTAG support enabled")
+else()
+	message("RP1 PIO JTAG support disabled")
+endif(ENABLE_RP1_PIO)
 
 if (ENABLE_REMOTEBITBANG)
 	add_definitions(-DENABLE_REMOTEBITBANG=1)
