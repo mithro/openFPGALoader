@@ -11,6 +11,7 @@
 
 #include <stdio.h>
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -50,7 +51,7 @@ static bool read_table(SFDP::read_fn_t rd, const sfdp_param_header_t &hdr,
 		len = SFDP_MAX_DWORDS;
 	std::vector<uint8_t> buf(len * 4);
 	if (!rd(hdr.ptp, buf.data(), len * 4))
-		return false;
+		throw std::runtime_error("SFDP table read failed");
 	table.clear();
 	for (int i = 0; i < len; i++)
 		table.push_back(le32(&buf[i * 4]));
@@ -66,7 +67,10 @@ bool SFDP::parse(read_fn_t rd)
 	_bfpt.clear();
 	_4bait.clear();
 
-	if (!rd(0, hdr, 8) || le32(hdr) != SFDP_SIGNATURE)
+	/* a transfer failure is an error; no signature means no SFDP */
+	if (!rd(0, hdr, 8))
+		throw std::runtime_error("SFDP header read failed");
+	if (le32(hdr) != SFDP_SIGNATURE)
 		return false;
 
 	_minor = hdr[4];
@@ -77,7 +81,7 @@ bool SFDP::parse(read_fn_t rd)
 
 	std::vector<uint8_t> ph(nph * 8);
 	if (!rd(8, ph.data(), nph * 8))
-		return false;
+		throw std::runtime_error("SFDP parameter headers read failed");
 
 	for (int i = 0; i < nph; i++) {
 		const uint8_t *p = &ph[i * 8];
