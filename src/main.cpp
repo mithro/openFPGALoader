@@ -160,7 +160,7 @@ static bool write_flash_info_json(const std::string &path)
 		return false;
 	}
 	std::string j = "{\"format\": \"openFPGALoader-flash-info\", "
-		"\"version\": 1, \"flashes\": [";
+		"\"version\": 2, \"flashes\": [";
 	for (size_t i = 0; i < recs.size(); i++)
 		j += (i ? ", " : "") + recs[i];
 	j += "]}\n";
