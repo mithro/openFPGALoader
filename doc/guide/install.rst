@@ -384,6 +384,7 @@ Example (enable FTDI-based cables and Xilinx devices only):
 - ``ENABLE_USB_BLASTERI``: Enable Altera USB-Blaster I support.
 - ``ENABLE_USB_BLASTERII``: Enable Altera USB-Blaster II support.
 - ``ENABLE_LIBGPIOD``: Enable libgpiod bitbang driver support (Linux only).
+- ``ENABLE_RP1_PIO``: Enable the Raspberry Pi 5 RP1 PIO JTAG driver (Linux only, off by default; requires `librp1jtag <https://github.com/mithro/rp1-jtag>`_).
 - ``ENABLE_REMOTEBITBANG``: Enable remote-bitbang driver support.
 - ``ENABLE_XILINX_VIRTUAL_CABLE_CLIENT``: Enable Xilinx Virtual Cable (XVC) client support.
 - ``ENABLE_XILINX_VIRTUAL_CABLE_SERVER``: Enable Xilinx Virtual Cable (XVC) server support.
