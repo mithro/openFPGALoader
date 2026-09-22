@@ -139,7 +139,9 @@ mode/dummy clocks, erase types, quad enable) and ``read_4byte``.
   but returned all ``0x00`` or all ``0xFF``: this is not an ID.
 * ``none`` with a ``note``: the part has no factory unique ID, as read from
   the chip itself (ie a Macronix part whose security register says no ESN
-  was programmed); ``note`` gives the register value.
+  was programmed). ``note`` is ``<fact>: <evidence>``: the text before the
+  first colon is a self-contained statement (``no factory ESN``), the rest
+  the register value it was read from.
 * ``none`` with a ``null`` note: openFPGALoader knows no unique ID command
   for this part (unknown manufacturer or family). This says nothing about
   the silicon, which may have one.
