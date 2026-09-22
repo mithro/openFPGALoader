@@ -123,7 +123,7 @@ file and a zero exit status mean the content was read:
        "manufacturer_jep106": "Spansion / Cypress / Infineon",
        "part": "S25FL256S", "size_bytes": 33554432, "size_source": "database",
        "unique_id": {"state": "read", "value": "e2789916a0809a22bbc76634c1bf53ed",
-                     "bits": 128, "opcode": "0x4b"},
+                     "bits": 128, "opcode": "0x4b", "note": null},
        "sfdp": null}]}
 
 ``flashes`` has one entry per flash (two with ``--target-flash both``).
