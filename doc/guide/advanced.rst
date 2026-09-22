@@ -121,7 +121,8 @@ file and a zero exit status mean the content was read:
       {"jedec_id": "0x010219", "manufacturer_id": "0x01", "memory_type": "0x02",
        "capacity": "0x19", "manufacturer": "Spansion",
        "manufacturer_jep106": "Spansion / Cypress / Infineon",
-       "part": "S25FL256S", "size_bytes": 33554432, "size_source": "database",
+       "part": "S25FL256S", "extended_id": "0x4d0180",
+       "size_bytes": 33554432, "size_source": "database",
        "unique_id": {"state": "read", "value": "e2789916a0809a22bbc76634c1bf53ed",
                      "bits": 128, "opcode": "0x4b", "note": null},
        "sfdp": null}]}
@@ -148,15 +149,30 @@ mode/dummy clocks, erase types, quad enable) and ``read_4byte``.
 
 A failed unique ID read is an error, never a ``state``: no file is written.
 
+``extended_id`` is ``null``, or RDID (``0x9F``) bytes 4-6 as ``"0x......"``
+for the families that define bytes after the 3-byte JEDEC ID (the bytes
+Linux spi-nor also uses to tell parts apart):
+
+* Micron N25Q / MT25Q: a length (``0x10``) then the 2-byte extended device ID
+  (ie ``0x104400`` on MT25Q "a" parts),
+* Spansion / Cypress / Infineon S25FL-S, S25FS-S, S25FL-P, S25SL and SEMPER:
+  for S-family parts the ID-CFI length (``0x4d``), the sector architecture
+  (``00``: uniform 256 KiB sectors, ``01``: 4 KiB parameter + 64 KiB
+  sectors) and the family (``80``: FL-S, ``81``: FS-S).
+
+For every other part the RDID bytes after the JEDEC ID are not defined, and
+``extended_id`` is ``null``.
+
 ``part`` and ``size_bytes`` with ``"size_source": "database"`` come from the
 internal database for this JEDEC ID, not from the chip: several parts may
 share one ID (ie ``0xc22017`` is used by more than one Macronix 64 Mbit part).
-The values read from the chip are the JEDEC ID fields, ``unique_id`` and
-``sfdp``.
+The values read from the chip are the JEDEC ID fields, ``extended_id``,
+``unique_id`` and ``sfdp``.
 
 ``format`` is always ``openFPGALoader-flash-info``, and ``version`` is
 increased whenever a field is renamed, removed or changes meaning, so a
-consumer should refuse a ``format`` or ``version`` it does not know. The
+consumer should refuse a ``format`` or ``version`` it does not know. New
+fields may be added without a new ``version``: ignore unknown fields. The
 openFPGALoader version string does not tell whether ``--flash-info`` is
 available: check for ``--flash-info-json`` in ``--help`` instead.
 
