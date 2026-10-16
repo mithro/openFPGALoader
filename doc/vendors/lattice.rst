@@ -125,9 +125,17 @@ load through /dev/gpiomem registers: ...``):
     held in reset) and the SPI lines out, until they are put back: SIGKILL,
     SIGSEGV, SIGBUS, SIGABRT, ``abort()``, ``std::terminate()``, ``exit()`` or
     ``_exit()`` called from elsewhere. libgpiod gives its lines back when
-    the process dies; this path does not. Recover with ``pinctrl set <n> ip``
-    for the lines and a pulse on CRESET_B so that the iCE40 boots its flash
-    (the Fomu's header check on the fpgas.online fleet pulses it).
+    the process dies; this path does not. To recover:
+
+    1. Put every line the load drives back to an input. That lets CRESET_B
+       go, and the board's pull-up then lets the iCE40 boot from its flash
+       (as the load itself relies on). For ``fomu_evt_header`` (SPI_SS 8,
+       SPI_SI 9, SPI_SO 10, SPI_SCK 11, /HOLD 25, CRESET_B 27) on a Pi 1-4:
+       ``pinctrl set 8,9,10,11,25,27 ip`` (``raspi-gpio set <n> ip`` on
+       older images, one pin at a time). With ``--pins`` the list is the
+       pins given, plus CRESET_B.
+    2. Check that CDONE (GPIO17) is high again: ``pinctrl get 17``.
+    3. If CDONE stays low, power-cycle the board.
 
   The SPI_SCK period is padded to 50 ns or more, each phase to 25 ns or
   more, so the clock is at or under 20 MHz; the data sheet allows 25 MHz and
