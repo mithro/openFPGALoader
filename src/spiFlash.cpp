@@ -16,6 +16,7 @@
 #include "display.hpp"
 #include "spiFlash.hpp"
 #include "spiFlashdb.hpp"
+#include "spiFlashSfdp.hpp"
 #include "spiInterface.hpp"
 
 /* read/write status register : 0B addr + 0 dummy */
@@ -47,6 +48,19 @@
 #define FLASH_RDFR     0x48
 /* Read OTP : 3 B addr + 8 clk cycle*/
 #define FLASH_ROTP     0x4B
+/* read unique ID (Winbond, GigaDevice, ISSI, Puya): 4 dummy Bytes */
+#define FLASH_RUID     0x4B
+/* read unique ID (Infineon S25FL-L): 4 dummy Bytes */
+#define FLASH_RUID_S25FLL 0x4C
+/* read SFDP: 3B addr + 8 clk cycle */
+#define FLASH_RDSFDP   0x5A
+/* read security ID (SST26): 2B addr + 8 clk cycle */
+#define FLASH_RSID     0x88
+/* Macronix secured OTP: read security register, enter/exit secured OTP */
+#define MX_RDSCUR      0x2B
+#	define MX_RDSCUR_FACTORY_LOCK (0x01)
+#define MX_ENSO        0xB1
+#define MX_EXSO        0xC1
 /* block (32Kb) erase */
 #define FLASH_BE32     0x52
 /* block (32Kb) erase with 4-byte address */
@@ -666,6 +680,390 @@ void SPIFlash::read_id()
 			}
 		}
 	}
+}
+
+/* JEP106 bank 1 manufacturer IDs commonly found on FPGA boards */
+std::string SPIFlash::manufacturer_name(uint8_t mfr_id)
+{
+	switch (mfr_id) {
+		case 0x01: return "Spansion / Cypress / Infineon";
+		case 0x0B: return "XTX";
+		case 0x1C: return "EON";
+		case 0x1F: return "Atmel / Adesto / Renesas";
+		case 0x20: return "Micron (ST / Numonyx) or XMC";
+		case 0x2C: return "Micron";
+		case 0x37: return "AMIC";
+		case 0x5E: return "Zbit";
+		case 0x68: return "Boya";
+		case 0x85: return "Puya";
+		case 0x8C: return "ESMT";
+		case 0x9D: return "ISSI";
+		case 0xA1: return "Fudan";
+		case 0xBA: return "Zetta";
+		case 0xBF: return "SST / Microchip";
+		case 0xC2: return "Macronix";
+		case 0xC8: return "GigaDevice";
+		case 0xEF: return "Winbond";
+		default:   return "unknown";
+	}
+}
+
+bool SPIFlash::read_sfdp(uint32_t addr, uint8_t *data, uint32_t len)
+{
+	/* 0x5A + 3 Byte address + 8 dummy clocks */
+	std::vector<uint8_t> tx(len + 4, 0), rx(len + 4, 0);
+	tx[0] = (addr >> 16) & 0xff;
+	tx[1] = (addr >>  8) & 0xff;
+	tx[2] = (addr      ) & 0xff;
+	if (_spi->spi_put(FLASH_RDSFDP, tx.data(), rx.data(), len + 4) != 0)
+		return false;
+	memcpy(data, rx.data() + 4, len);
+	return true;
+}
+
+std::vector<std::string> SPIFlash::_info_json_records;
+
+/* Macronix factory ESN: see read_unique_id() */
+SPIFlash::uid_state_t SPIFlash::read_macronix_esn(std::vector<uint8_t> &uid,
+		uint8_t &opcode, std::string &note)
+{
+	uint8_t scur;
+	if (_spi->spi_put(MX_RDSCUR, NULL, &scur, 1) != 0)
+		throw std::runtime_error("Security register read failed");
+	/* all ones: nothing answered (reserved bits are never all set) */
+	if (scur == 0xff)
+		throw std::runtime_error("Security register read failed (0xff)");
+
+	char buf[96];
+	if (!(scur & MX_RDSCUR_FACTORY_LOCK)) {
+		snprintf(buf, sizeof(buf), "no factory ESN: security register "
+				"0x%02x, bit 0 (factory lock) = 0", scur);
+		note = buf;
+		return UID_NONE;
+	}
+
+	/* factory locked: ESN is secured OTP 0x00-0x0F. Always leave the
+	 * secured OTP mode: the main array is not accessible inside it.
+	 */
+	opcode = MX_ENSO;
+	uint8_t tx[3 + 16] = {0}, rx[3 + 16];
+	int ret = _spi->spi_put(MX_ENSO, NULL, NULL, 0);
+	if (ret == 0)
+		ret = _spi->spi_put(FLASH_READ, tx, rx, sizeof(tx));
+	const int ret_exit = _spi->spi_put(MX_EXSO, NULL, NULL, 0);
+	if (ret != 0 || ret_exit != 0)
+		throw std::runtime_error("Secured OTP (ESN) read failed");
+
+	uid.assign(rx + 3, rx + sizeof(rx));
+	note = "factory ESN in secured OTP";
+	bool all_00 = true, all_ff = true;
+	for (auto b : uid) {
+		all_00 &= (b == 0x00);
+		all_ff &= (b == 0xff);
+	}
+	return (all_00 || all_ff) ? UID_BLANK : UID_READ;
+}
+
+SPIFlash::uid_state_t SPIFlash::read_unique_id(std::vector<uint8_t> &uid,
+		uint8_t &opcode, std::string &note)
+{
+	const uint8_t mfr = (_jedec_id >> 24) & 0xff;
+	const uint8_t mem_type = (_jedec_id >> 16) & 0xff;
+	uint8_t cmd;
+	uint32_t skip;     /* address + dummy Bytes sent before the ID */
+	uint32_t uid_len;
+
+	opcode = 0;
+	uid.clear();
+	note.clear();
+
+	/* only read-only commands, and only when the vendor/family is known:
+	 * the same opcode may have another meaning on other devices
+	 */
+	switch (mfr) {
+		case 0xEF:  /* Winbond W25Q: 4 dummy Bytes, 64 bits */
+			cmd = FLASH_RUID; skip = 4; uid_len = 8;
+			break;
+		case 0xC8:  /* GigaDevice GD25Q: 3 addr + 1 dummy, 128 bits */
+		case 0x9D:  /* ISSI IS25LP/WP: 3 addr + 1 dummy, 128 bits */
+		case 0x85:  /* Puya P25Q: 3 addr + 1 dummy, 128 bits */
+			cmd = FLASH_RUID; skip = 4; uid_len = 16;
+			break;
+		case 0x20:
+			/* Micron N25Q/MT25Q: extended RDID, byte 3 = remaining
+			 * length (0x10), bytes 6-19: 14 Bytes UID
+			 */
+			if (mem_type != 0xBA && mem_type != 0xBB)
+				return UID_NONE;
+			cmd = 0x9F; skip = 6; uid_len = 14;
+			break;
+		case 0x01:
+			if (mem_type == 0x60) {
+				/* Infineon S25FL-L: RUID 0x4C, 4 dummy, 64 bits */
+				cmd = FLASH_RUID_S25FLL; skip = 4; uid_len = 8;
+			} else if ((_jedec_id >> 8) == 0x010219 ||
+					(_jedec_id >> 8) == 0x012018) {
+				/* Spansion S25FL256S / S25FL128S: OTP bytes 0x0-0xF hold
+				 * a factory programmed 128-bit random number
+				 * (S25FL128S/256S datasheet 9.1.3), read with OTPR:
+				 * 3 addr + 1 dummy (10.7.2). Same for the S25FL127S, which
+				 * shares 0x012018 (S25FL127S datasheet 8.1.3 and 9.7.2).
+				 */
+				cmd = FLASH_ROTP; skip = 4; uid_len = 16;
+			} else {
+				return UID_NONE;
+			}
+			break;
+		case 0xC2:
+			/* Macronix: no unique ID command. A 128-bit ESN is only
+			 * programmed in the secured OTP (0x00-0x0F) on "special
+			 * order", then security register bit 0 is set (factory lock)
+			 * (Macronix AN0218, Serial Flash Secured OTP Area Introduction)
+			 */
+			return read_macronix_esn(uid, opcode, note);
+		case 0xBF:  /* SST26: Security ID 0x88, 2 addr + 1 dummy, 64 bits */
+			if (mem_type != 0x26)
+				return UID_NONE;
+			cmd = FLASH_RSID; skip = 3; uid_len = 8;
+			break;
+		default:
+			return UID_NONE;
+	}
+
+	/* from here, the part has a unique ID: a failure is an error, never
+	 * "no unique ID"
+	 */
+	opcode = cmd;
+	std::vector<uint8_t> tx(skip + uid_len, 0), rx(skip + uid_len, 0);
+	if (_spi->spi_put(cmd, tx.data(), rx.data(), skip + uid_len) != 0)
+		throw std::runtime_error("Unique ID read failed");
+	if (cmd == 0x9F && rx[3] != 0x10) {
+		char msg[96];
+		snprintf(msg, sizeof(msg), "Unique ID read failed: unexpected RDID "
+				"extended length 0x%02x (expected 0x10)", rx[3]);
+		throw std::runtime_error(msg);
+	}
+
+	uid.assign(rx.begin() + skip, rx.end());
+
+	/* blank (all 0x00 or all 0xFF): not a real ID */
+	bool all_00 = true, all_ff = true;
+	for (auto b : uid) {
+		all_00 &= (b == 0x00);
+		all_ff &= (b == 0xff);
+	}
+	return (all_00 || all_ff) ? UID_BLANK : UID_READ;
+}
+
+bool SPIFlash::read_extended_id(std::vector<uint8_t> &ext, std::string &desc)
+{
+	const uint8_t mfr = (_jedec_id >> 24) & 0xff;
+	const uint8_t mem_type = (_jedec_id >> 16) & 0xff;
+
+	ext.clear();
+	desc.clear();
+
+	/* only families whose RDID defines the bytes after the JEDEC ID (as
+	 * Linux spi-nor keys parts on them): other parts leave them undefined
+	 */
+	/* Micron N25Q / MT25Q */
+	const bool micron = mfr == 0x20 && (mem_type == 0xBA || mem_type == 0xBB);
+	/* Spansion S25FL-S/FS-S/FL-P/SL (not S25FL-L, type 0x60) and
+	 * Infineon SEMPER S25HL-T/HS-T/FS-T
+	 */
+	const bool spansion = (mfr == 0x01 && (mem_type == 0x02 || mem_type == 0x20)) ||
+		mfr == 0x34;
+	if (!micron && !spansion)
+		return false;
+
+	uint8_t rx[6];
+	if (_spi->spi_put(0x9F, NULL, rx, sizeof(rx)) != 0)
+		throw std::runtime_error("Extended ID read failed");
+	const uint32_t id = (rx[0] << 16) | (rx[1] << 8) | rx[2];
+	if (id != (_jedec_id >> 8)) {
+		char msg[128];
+		snprintf(msg, sizeof(msg), "Unstable JEDEC ID: 0x%06x then 0x%06x "
+				"(extended ID read)", _jedec_id >> 8, id);
+		throw std::runtime_error(msg);
+	}
+	ext.assign(rx + 3, rx + 6);
+
+	char buf[160];
+	if (micron) {
+		/* byte 4: length of the data that follows (0x10: extended device
+		 * ID then unique ID), bytes 5-6: extended device ID
+		 * (ie 0x10 0x44 0x00 for MT25Q "a" parts in Linux spi-nor)
+		 */
+		snprintf(buf, sizeof(buf), "length 0x%02x, extended device ID 0x%02x%02x",
+				rx[3], rx[4], rx[5]);
+	} else if (mfr == 0x01 && rx[3] == 0x4D) {
+		/* S25FL-S / S25FS-S: byte 4 ID-CFI length, byte 5 sector
+		 * architecture, byte 6 family (Linux spi-nor s25fl128s0 = 4d 00 80
+		 * with 256 KiB sectors, s25fl128s1 = 4d 01 80 with 64 KiB sectors,
+		 * s25fs128s1 = 4d 01 81)
+		 */
+		const char *arch = rx[4] == 0x00 ? "uniform 256 KiB sectors" :
+			rx[4] == 0x01 ? "4 KiB parameter + 64 KiB sectors" : "unknown";
+		const char *family = rx[5] == 0x80 ? "FL-S" :
+			rx[5] == 0x81 ? "FS-S" : "unknown";
+		snprintf(buf, sizeof(buf), "ID-CFI length 0x4d, sector architecture "
+				"0x%02x (%s), family 0x%02x (%s)", rx[4], arch, rx[5], family);
+	} else {
+		snprintf(buf, sizeof(buf), "bytes 4-6 0x%02x 0x%02x 0x%02x",
+				rx[3], rx[4], rx[5]);
+	}
+	desc = buf;
+	return true;
+}
+
+void SPIFlash::display_info()
+{
+	const uint8_t mfr = (_jedec_id >> 24) & 0xff;
+	const uint8_t mem_type = (_jedec_id >> 16) & 0xff;
+	const uint8_t capacity = (_jedec_id >> 8) & 0xff;
+
+	/* this output identifies a part: refuse to report an ID that is not
+	 * a real one (ie read without a working SPI bridge)
+	 * JEP106: 7 data bits + 1 odd parity bit
+	 */
+	int ones = 0;
+	for (int i = 0; i < 8; i++)
+		ones += (mfr >> i) & 0x01;
+	if ((ones & 0x01) == 0) {
+		char msg[128];
+		snprintf(msg, sizeof(msg), "Invalid JEDEC ID 0x%06x: manufacturer "
+				"0x%02x fails JEP106 odd parity", _jedec_id >> 8, mfr);
+		throw std::runtime_error(msg);
+	}
+	/* a second read must give the same ID */
+	uint8_t rx[3] = {0, 0, 0};
+	if (_spi->spi_put(0x9F, NULL, rx, 3) != 0)
+		throw std::runtime_error("JEDEC ID read failed");
+	const uint32_t id2 = (rx[0] << 16) | (rx[1] << 8) | rx[2];
+	if (id2 != (_jedec_id >> 8)) {
+		char msg[128];
+		snprintf(msg, sizeof(msg), "Unstable JEDEC ID: 0x%06x then 0x%06x",
+				_jedec_id >> 8, id2);
+		throw std::runtime_error(msg);
+	}
+
+	/* SFDP: always asked. No SFDP signature in the answer (old parts)
+	 * is not an error, a failed read is
+	 */
+	SFDP sfdp;
+	sfdp.parse([this](uint32_t addr, uint8_t *buf, uint32_t len) {
+			return read_sfdp(addr, buf, len);});
+
+	printf("\nSPI Flash information\n");
+	printf("JEDEC ID          : 0x%06x (manufacturer 0x%02x, type 0x%02x, "
+			"capacity 0x%02x)\n", _jedec_id >> 8, mfr, mem_type, capacity);
+	printf("Manufacturer      : %s\n",
+			_flash_model ? _flash_model->manufacturer.c_str() :
+			manufacturer_name(mfr).c_str());
+	printf("Part              : %s\n",
+			_flash_model ? _flash_model->model.c_str() :
+			"unknown (not in openFPGALoader database)");
+
+	/* size: database first, then SFDP, then guess from JEDEC capacity */
+	uint64_t size = 0;
+	std::string size_src;
+	if (_flash_model) {
+		size = (uint64_t)_flash_model->nr_sector * 0x10000;
+		size_src = "database";
+	} else if (sfdp.has_bfpt()) {
+		size = sfdp.density_bits() / 8;
+		size_src = "SFDP";
+	} else if (capacity >= 0x10 && capacity <= 0x19) {
+		/* 2^n Byte encoding used by most (not all) vendors */
+		size = 1ULL << capacity;
+		size_src = "guessed from JEDEC capacity byte";
+	}
+	if (size)
+		printf("Size              : %llu Byte (%llu MiB / %llu Mbit, %s)\n",
+				(unsigned long long)size,
+				(unsigned long long)(size >> 20),
+				(unsigned long long)(size >> 17), size_src.c_str());
+	else
+		printf("Size              : unknown\n");
+	if (_flash_model && sfdp.has_bfpt() &&
+			sfdp.density_bits() / 8 != size)
+		printWarn("SFDP size (" + std::to_string(sfdp.density_bits() / 8) +
+				" Byte) differs from database");
+
+	std::vector<uint8_t> ext;
+	std::string ext_desc, ext_hex;
+	if (read_extended_id(ext, ext_desc)) {
+		for (auto b : ext) {
+			char buf[4];
+			snprintf(buf, sizeof(buf), "%02x", b);
+			ext_hex += buf;
+		}
+		printf("Extended ID       : 0x%s (RDID bytes 4-6: %s)\n",
+				ext_hex.c_str(), ext_desc.c_str());
+	} else {
+		printf("Extended ID       : none (not defined for this manufacturer/part)\n");
+	}
+
+	std::vector<uint8_t> uid;
+	uint8_t uid_opcode;
+	std::string uid_note;
+	const uid_state_t uid_state = read_unique_id(uid, uid_opcode, uid_note);
+	std::string uid_hex;
+	for (auto b : uid) {
+		char buf[4];
+		snprintf(buf, sizeof(buf), "%02x", b);
+		uid_hex += buf;
+	}
+	if (uid_state == UID_READ) {
+		printf("Unique ID         : %s (opcode 0x%02X, %zu bits)\n",
+				uid_hex.c_str(), uid_opcode, uid.size() * 8);
+	} else if (uid_state == UID_BLANK) {
+		printf("Unique ID         : blank (opcode 0x%02X, %zu bits returned "
+				"all 0x00/0xFF)\n", uid_opcode, uid.size() * 8);
+	} else if (!uid_note.empty()) {
+		printf("Unique ID         : not available (%s)\n", uid_note.c_str());
+	} else {
+		printf("Unique ID         : not available (unsupported for "
+				"this manufacturer/part)\n");
+	}
+
+	sfdp.display(mfr);
+	printf("\n");
+
+	/* machine readable record (see --flash-info-json) */
+	static const char *uid_states[] = {"none", "blank", "read"};
+	const std::string jep106 = manufacturer_name(mfr);
+	std::string j = "{\"jedec_id\": " + json_hex(_jedec_id >> 8, 6) +
+		", \"manufacturer_id\": " + json_hex(mfr, 2) +
+		", \"memory_type\": " + json_hex(mem_type, 2) +
+		", \"capacity\": " + json_hex(capacity, 2) +
+		", \"manufacturer\": " + (_flash_model ?
+			json_string(_flash_model->manufacturer) : std::string("null")) +
+		", \"manufacturer_jep106\": " + (jep106 == "unknown" ?
+			std::string("null") : json_string(jep106)) +
+		", \"part\": " + (_flash_model ?
+			json_string(_flash_model->model) : std::string("null")) +
+		", \"extended_id\": " + (ext_hex.empty() ? std::string("null") :
+			json_string("0x" + ext_hex));
+	static const char *size_srcs[] = {"database", "sfdp", "jedec_capacity"};
+	if (size)
+		j += ", \"size_bytes\": " + std::to_string(size) +
+			", \"size_source\": " + json_string(
+				size_src == "database" ? size_srcs[0] :
+				size_src == "SFDP" ? size_srcs[1] : size_srcs[2]);
+	else
+		j += ", \"size_bytes\": null, \"size_source\": null";
+	j += std::string(", \"unique_id\": {\"state\": \"") + uid_states[uid_state] +
+		"\", \"value\": " + (uid_state == UID_READ ? json_string(uid_hex) :
+				std::string("null")) +
+		", \"bits\": " + (uid_state == UID_NONE ? std::string("null") :
+				std::to_string(uid.size() * 8)) +
+		", \"opcode\": " + (uid_state == UID_NONE ? std::string("null") :
+				json_hex(uid_opcode, 2)) +
+		", \"note\": " + (uid_note.empty() ? std::string("null") :
+				json_string(uid_note)) + "}";
+	j += ", \"sfdp\": " + sfdp.to_json(mfr) + "}";
+	_info_json_records.push_back(j);
 }
 
 void SPIFlash::display_status_reg(uint8_t reg)
