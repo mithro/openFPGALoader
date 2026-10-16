@@ -106,6 +106,15 @@ typedef struct {
 #define SPI_BOARD(_name, _manufacturer, _fpga_part, _cable, _rst, _done, _oe, _cs, _sck, _si, _so, _holdn, _wpn, _freq) \
 	{_name, {_manufacturer, _cable, _fpga_part, _rst, _done, _oe, COMM_SPI, SPI_FLASH, {}, \
 		{_cs, _sck, _so, _si, _holdn, _wpn}, _freq, 0, 0, -1}}
+/* An FPGA's SPI port wired to host GPIO lines (libgpiod cable): the pins are
+ * GPIO line numbers, not FTDI masks; GPIO_NC: not connected. _si is the
+ * host's output into the FPGA's SPI_SI, _so the FPGA's SPI_SO, _holdn the
+ * /HOLD of a flash sharing the bus.
+ */
+#define GPIO_NC 0xffff
+#define SPI_GPIO_BOARD(_name, _manufacturer, _fpga_part, _rst, _done, _cs, _sck, _si, _so, _holdn) \
+	{_name, {_manufacturer, "libgpiod", _fpga_part, _rst, _done, 0, COMM_SPI, SPI_FLASH, {}, \
+		{_cs, _sck, _so, _si, _holdn, GPIO_NC}, 0, 0, 0, -1}}
 #define DFU_BOARD(_name, _fpga_part, _cable, _vid, _pid, _alt) \
 	{_name, {"", _cable, _fpga_part, 0, 0, 0, COMM_DFU, SPI_FLASH, {}, {}, 0, _vid, _pid, _alt}}
 
@@ -178,6 +187,12 @@ static std::map <std::string, target_board_t> board_list = {
 	SPI_BOARD("fireant",          "efinix", "trion", "ft232",
 			DBUS4, DBUS5, 0, DBUS3, DBUS0, DBUS1, DBUS2, DBUS6, 0, CABLE_DEFAULT),
 	DFU_BOARD("fomu",             "", "dfu", 0x1209, 0x5bf0, 0),
+	/* Fomu EVT on a Raspberry Pi header (BCM GPIO numbers): CRESET 27,
+	 * CDONE 17, SPI_SS 8, SPI_SCK 11, SPI_SI 9 (the Pi's MISO pin),
+	 * SPI_SO 10, flash /HOLD (SPI_IO3) 25. SRAM load only.
+	 */
+	SPI_GPIO_BOARD("fomu_evt_header", "lattice", "ice40",
+			27, 17, 8, 11, 9, 10, 25),
 	SPI_BOARD("ft2232_spi",      "none", "none", "ft2232",
 			DBUS7, DBUS6, 0,
 			DBUS4, DBUS0, DBUS1, DBUS2,

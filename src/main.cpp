@@ -46,6 +46,9 @@
 #ifdef ENABLE_ICE40_SUPPORT
 #include "ice40.hpp"
 #endif
+#if defined(ENABLE_ICE40_SUPPORT) && defined(ENABLE_LIBGPIOD)
+#include "libgpiodIce40Spi.hpp"
+#endif
 #ifdef ENABLE_LATTICESSPI_SUPPORT
 #include "latticeSSPI.hpp"
 #endif
@@ -132,6 +135,8 @@ struct arguments {
 	bool read_xadc;
 	std::string read_register;
 	std::string user_flash;
+	size_t pin_count; /* how many --pins were given */
+	bool freq_given; /* --freq was given */
 };
 
 int run_xvc_server(const struct arguments &args, const cable_t &cable,
@@ -139,6 +144,10 @@ int run_xvc_server(const struct arguments &args, const cable_t &cable,
 
 #ifdef USE_LIBFTDI
 int spi_comm(struct arguments args, const cable_t &cable,
+	const jtag_pins_conf_t *pins_config, target_board_t *board);
+#endif
+#ifdef ENABLE_LIBGPIOD
+int gpio_spi_comm(struct arguments args,
 	const jtag_pins_conf_t *pins_config, target_board_t *board);
 #endif
 
@@ -172,7 +181,9 @@ int main(int argc, char **argv)
 			false, 3721, "-",
 			"", false, {},  // mcufw conmcu, user_misc_dev_list
 			false, false, "", // read_dna, read_xadc, read_register
-			"" // user_flash
+			"", // user_flash
+			0, // pin_count
+			false // freq_given
 	};
 	/* parse arguments */
 	int ret = parse_opt(argc, argv, &args, &pins_config);
@@ -304,6 +315,22 @@ int main(int argc, char **argv)
 	/* SPI FLASH direct access */
 	/* ----------------------- */
 	if (args.spi || (board && board->mode == COMM_SPI)) {
+		/* a board wired to host GPIO lines gives GPIO numbers, not FTDI
+		 * pin masks: only the libgpiod cable may use them
+		 */
+		if (board && board->cable_name == "libgpiod" &&
+				cable.type != MODE_LIBGPIOD_BITBANG) {
+			printError("Error: board " + args.board + " is wired to GPIO "
+				"lines and needs the libgpiod cable" +
+				(cable_list.count("libgpiod") ?
+				 std::string(", not ") + args.cable :
+				 std::string(": this build has none (ENABLE_LIBGPIOD)")));
+			return EXIT_FAILURE;
+		}
+#ifdef ENABLE_LIBGPIOD
+		if (cable.type == MODE_LIBGPIOD_BITBANG)
+			return gpio_spi_comm(args, &pins_config, board);
+#endif
 #ifdef USE_LIBFTDI
 		return spi_comm(args, cable, &pins_config, board);
 #else
@@ -890,6 +917,111 @@ int spi_comm(struct arguments args, const cable_t &cable,
 }
 #endif
 
+#ifdef ENABLE_LIBGPIOD
+/* iCE40 SRAM load as an SPI slave over host GPIO lines (libgpiod). SRAM
+ * only: the flash sharing the bus is held off it, never read or written.
+ */
+int gpio_spi_comm(struct arguments args,
+	const jtag_pins_conf_t *pins_config, target_board_t *board)
+{
+	if (!board || board->manufacturer != "lattice" ||
+			board->fpga_part != "ice40") {
+		printError("Error: the libgpiod cable in SPI mode loads an iCE40's "
+			"SRAM only: give its board with -b (fomu_evt_header)");
+		return EXIT_FAILURE;
+	}
+	/* only a board wired to GPIO lines (SPI_GPIO_BOARD) gives GPIO numbers:
+	 * any other board's pins are FTDI masks, which as GPIO numbers would
+	 * drive unrelated lines
+	 */
+	if (board->cable_name != "libgpiod") {
+		printError("Error: board " + args.board + " is not wired to GPIO "
+			"lines: its pins are " + board->cable_name + " pin masks, not "
+			"GPIO numbers, so the libgpiod cable cannot use them");
+		return EXIT_FAILURE;
+	}
+#ifndef ENABLE_ICE40_SUPPORT
+	(void)args; (void)pins_config;
+	printError("Support for ICE40 FPGAs was not enabled at compile time");
+	return EXIT_FAILURE;
+#else
+	if (args.prg_type == Device::PRG_NONE)
+		args.prg_type = Device::WR_SRAM;
+	if (args.prg_type != Device::WR_SRAM || args.detect ||
+			args.detect_flash || args.protect_flash ||
+			args.unprotect_flash || args.bulk_erase_flash ||
+			args.enable_quad || args.disable_quad || args.reset) {
+		printError("Error: board " + args.board + " (libgpiod cable): only "
+			"an SRAM load is supported; the flash is never accessed");
+		return EXIT_FAILURE;
+	}
+	if (args.verify) {
+		printError("Error: an iCE40 SRAM load cannot be read back to verify; "
+			"CDONE is checked instead");
+		return EXIT_FAILURE;
+	}
+	if (args.bit_file.empty()) {
+		printError("Error: no bitstream file");
+		return EXIT_FAILURE;
+	}
+	/* options this load would otherwise ignore */
+	if (args.freq_given) {
+		printError("Error: --freq: the GPIO bit-bang runs as fast as the host "
+			"can; it cannot be set, only measured (and it must be 1 to "
+			"25 MHz)");
+		return EXIT_FAILURE;
+	}
+	if (args.offset != 0) {
+		printError("Error: --offset: an SRAM load has no offset");
+		return EXIT_FAILURE;
+	}
+	if (!args.secondary_bit_file.empty()) {
+		printError("Error: --secondary-bitstream: an SRAM load takes one "
+			"bitstream");
+		return EXIT_FAILURE;
+	}
+
+	ice40_gpio_pins_t pins;
+	pins.creset = board->reset_pin;
+	pins.cdone = board->done_pin;
+	pins.si = board->spi_pins_config.mosi_pin;
+	pins.so = board->spi_pins_config.miso_pin;
+	pins.sck = board->spi_pins_config.sck_pin;
+	pins.ss = board->spi_pins_config.cs_pin;
+	pins.holdn = (board->spi_pins_config.holdn_pin == GPIO_NC) ?
+		-1 : board->spi_pins_config.holdn_pin;
+	/* the board's SPI configuration flash shares the iCE40's SPI bus */
+	pins.flash = board->spi_bpi == SPI_FLASH;
+	if (args.pin_config) {
+		/* MOSI:MISO:SCK:CS[:HOLDN], MOSI being the host's output into the
+		 * iCE40's SPI_SI
+		 */
+		if (args.pin_count > 5) {
+			printError("Error: --pins for board " + args.board +
+				" is MOSI:MISO:SCK:CS[:HOLDN] (no WPN)");
+			return EXIT_FAILURE;
+		}
+		printInfo("Board default pins configuration overridden");
+		pins.si = pins_config->tdi_pin;
+		pins.so = pins_config->tdo_pin;
+		pins.sck = pins_config->tck_pin;
+		pins.ss = pins_config->tms_pin;
+		pins.holdn = (args.pin_count == 5) ? pins_config->ext0_pin : -1;
+	}
+
+	try {
+		LibgpiodIce40Spi gpio(pins, args.device, args.verbose);
+		Ice40 target(&gpio, args.bit_file, args.file_type, args.verbose);
+		target.program(0, false);
+	} catch (std::exception &e) {
+		printError("Error: iCE40 SRAM load failed: " + std::string(e.what()));
+		return EXIT_FAILURE;
+	}
+	return EXIT_SUCCESS;
+#endif
+}
+#endif
+
 // parse double from string in engineering notation
 // can deal with postfixes k and m, add more when required
 static int parse_eng(std::string arg, double *dst) {
@@ -1166,6 +1298,7 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 				return -1;
 			}
 			args->freq = static_cast<uint32_t>(freq);
+			args->freq_given = true;
 		}
 
 		if (result.count("status-pin")) {
@@ -1243,9 +1376,18 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 					pin_num = pins_list[pins[i]];
 				}
 
+				/* the fields are 8 bits: a larger value would be truncated
+				 * to another pin
+				 */
+				if (pin_num < 0 || pin_num > 255) {
+					printError("Error: --pins: " + pins[i] +
+						" is outside 0 to 255");
+					return -1;
+				}
 				*pin_fields[i] = pin_num;
 			}
 			args->pin_config = true;
+			args->pin_count = pins.size();
 		}
 
 		if (args->target_flash == "both" || args->target_flash == "secondary") {
