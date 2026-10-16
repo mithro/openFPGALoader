@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <map>
 #include <sstream>
 #include <vector>
@@ -30,6 +31,9 @@
 #ifdef ENABLE_DFU
 #include "dfu.hpp"
 #endif
+#ifdef ENABLE_TT_MICROPYTHON
+#include "ttMicropython.hpp"
+#endif
 #include "display.hpp"
 #ifdef ENABLE_EFINIX_SUPPORT
 #include "efinix.hpp"
@@ -45,6 +49,10 @@
 #endif
 #ifdef ENABLE_ICE40_SUPPORT
 #include "ice40.hpp"
+#endif
+#if defined(ENABLE_ICE40_SUPPORT) && defined(ENABLE_LIBGPIOD)
+#include "gpiomemIce40Spi.hpp"
+#include "libgpiodIce40Spi.hpp"
 #endif
 #ifdef ENABLE_LATTICESSPI_SUPPORT
 #include "latticeSSPI.hpp"
@@ -125,8 +133,12 @@ struct arguments {
 	std::map<uint32_t, misc_device> user_misc_devs;
 	bool read_dna;
 	bool read_xadc;
-	string read_register;
-	string user_flash;
+	std::string read_register;
+	std::string user_flash;
+	bool flash_info;
+	std::string flash_info_json;
+	size_t pin_count; /* how many --pins were given */
+	bool freq_given; /* --freq was given */
 };
 
 int run_xvc_server(const struct arguments &args, const cable_t &cable,
@@ -136,11 +148,45 @@ int run_xvc_server(const struct arguments &args, const cable_t &cable,
 int spi_comm(struct arguments args, const cable_t &cable,
 	const jtag_pins_conf_t *pins_config, target_board_t *board);
 #endif
+#ifdef ENABLE_LIBGPIOD
+int gpio_spi_comm(struct arguments args,
+	const jtag_pins_conf_t *pins_config, target_board_t *board);
+#endif
 
 int parse_opt(int argc, char **argv, struct arguments *args,
 	jtag_pins_conf_t *pins_config);
 
 void displaySupported(const struct arguments &args);
+
+/* --flash-info-json: write every SPIFlash::display_info() record, only
+ * called when all flash accesses succeeded
+ */
+static bool write_flash_info_json(const std::string &path)
+{
+	const std::vector<std::string> &recs = SPIFlash::info_json_records();
+	if (recs.empty()) {
+		printError("Error: no SPI flash information to write");
+		return false;
+	}
+	std::string j = "{\"format\": \"openFPGALoader-flash-info\", "
+		"\"version\": 2, \"flashes\": [";
+	for (size_t i = 0; i < recs.size(); i++)
+		j += (i ? ", " : "") + recs[i];
+	j += "]}\n";
+
+	/* write + rename: path never holds a partial file */
+	const std::string tmp = path + ".tmp";
+	std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+	out << j;
+	out.close();
+	if (!out || rename(tmp.c_str(), path.c_str()) != 0) {
+		printError("Error: failed to write " + path);
+		remove(tmp.c_str());
+		return false;
+	}
+	printInfo("SPI flash information written to " + path);
+	return true;
+}
 
 int main(int argc, char **argv)
 {
@@ -165,12 +211,20 @@ int main(int argc, char **argv)
 			false, 3721, "-",
 			"", false, {},  // mcufw conmcu, user_misc_dev_list
 			false, false, "", // read_dna, read_xadc, read_register
-			"" // user_flash
+			"", // user_flash
+			false, // flash_info
+			"", // flash_info_json
+			0, // pin_count
+			false // freq_given
 	};
 	/* parse arguments */
 	int ret = parse_opt(argc, argv, &args, &pins_config);
 	if (ret != 0)
 		return (ret == 1) ? EXIT_SUCCESS : EXIT_FAILURE;
+
+	/* a failed run must not leave a previous run's file behind */
+	if (!args.flash_info_json.empty())
+		remove(args.flash_info_json.c_str());
 
 	if (args.is_list_command) {
 		displaySupported(args);
@@ -210,6 +264,29 @@ int main(int argc, char **argv)
 			} else {
 				cout << "Board default cable overridden with " << args.cable << endl;
 			}
+		}
+
+		/* Auto-detect GPIO cable for boards with bitbang pins but no
+		 * default cable (e.g. netv2): use rp1pio on RPi 5, libgpiod
+		 * elsewhere.
+		 */
+		if (args.cable[0] == '-' && board->cable_name.empty() &&
+		    board->jtag_pins_config.tck_pin != 0) {
+#ifdef ENABLE_RP1_PIO
+			if (access("/dev/pio0", F_OK) == 0) {
+				args.cable = "rp1pio";
+			} else
+#endif
+			{
+#ifdef ENABLE_LIBGPIOD
+				args.cable = "libgpiod";
+#else
+				printError("No GPIO cable available: "
+					"build with ENABLE_RP1_PIO or ENABLE_LIBGPIOD");
+				return EXIT_FAILURE;
+#endif
+			}
+			printInfo("Auto-detected cable: " + args.cable);
 		}
 
 		/* Xilinx only: to write flash exact fpga model must be provided */
@@ -293,8 +370,25 @@ int main(int argc, char **argv)
 	/* ----------------------- */
 	/* SPI FLASH direct access */
 	/* ----------------------- */
-	if (args.spi || (board && board->mode == COMM_SPI))
+	if (args.spi || (board && board->mode == COMM_SPI)) {
+		/* a board wired to host GPIO lines gives GPIO numbers, not FTDI
+		 * pin masks: only the libgpiod cable may use them
+		 */
+		if (board && board->cable_name == "libgpiod" &&
+				cable.type != MODE_LIBGPIOD_BITBANG) {
+			printError("Error: board " + args.board + " is wired to GPIO "
+				"lines and needs the libgpiod cable" +
+				(cable_list.count("libgpiod") ?
+				 std::string(", not ") + args.cable :
+				 std::string(": this build has none (ENABLE_LIBGPIOD)")));
+			return EXIT_FAILURE;
+		}
+#ifdef ENABLE_LIBGPIOD
+		if (cable.type == MODE_LIBGPIOD_BITBANG)
+			return gpio_spi_comm(args, &pins_config, board);
+#endif
 		return spi_comm(args, cable, &pins_config, board);
+	}
 #else
 		printError("SPI Flash Direct access: disabled at build time");
 		return EXIT_FAILURE;
@@ -356,6 +450,90 @@ int main(int argc, char **argv)
 		return EXIT_SUCCESS;
 #else
 		printError("DFU support: disabled at build time");
+		return EXIT_FAILURE;
+#endif
+	}
+
+	/* --------------------------------- */
+	/* TinyTapeout MicroPython access   */
+	/* --------------------------------- */
+	if (board && board->mode == COMM_TT_MICROPYTHON) {
+#ifdef ENABLE_TT_MICROPYTHON
+		/* Refuse what this backend cannot do, before opening the port */
+		if (args.detect_flash) {
+			printError("TinyTapeout MicroPython: flash detection is not "
+				"supported (the board has no SPI flash)");
+			return EXIT_FAILURE;
+		}
+		if (args.prg_type == Device::RD_FLASH) {
+			printError("TinyTapeout MicroPython: reading the flash is not "
+				"supported (the board has no SPI flash)");
+			return EXIT_FAILURE;
+		}
+		if (args.prg_type == Device::WR_FLASH) {
+			printError("TinyTapeout MicroPython: writing the flash is not "
+				"supported (the board has no SPI flash); use --write-sram");
+			return EXIT_FAILURE;
+		}
+		if (args.verify) {
+			printError("TinyTapeout MicroPython: --verify is not supported");
+			return EXIT_FAILURE;
+		}
+		if (args.reset) {
+			printError("TinyTapeout MicroPython: --reset is not supported");
+			return EXIT_FAILURE;
+		}
+		if (!args.file_type.empty()) {
+			printError("TinyTapeout MicroPython: --file-type is not "
+				"supported (the file is sent to the FPGA as it is)");
+			return EXIT_FAILURE;
+		}
+		if (args.offset != 0 || args.bulk_erase_flash ||
+				args.unprotect_flash || args.external_flash ||
+				!args.secondary_bit_file.empty()) {
+			printError("TinyTapeout MicroPython: --offset, --bulk-erase, "
+				"--unprotect-flash, --external-flash and "
+				"--secondary-bitstream are not supported");
+			return EXIT_FAILURE;
+		}
+
+		std::string serial_port = args.device;
+		if (serial_port.empty() || serial_port == "-") {
+			serial_port = TTMicropython::detectSerialPort(args.verbose);
+			if (serial_port.empty()) {
+				printError("No TinyTapeout board found");
+				return EXIT_FAILURE;
+			}
+		}
+
+		bool write_flash = (args.prg_type == Device::WR_FLASH);
+
+		try {
+			TTMicropython tt(args.bit_file, args.file_type,
+				serial_port, write_flash, args.verify, args.verbose);
+
+			if (args.detect) {
+				tt.detect();
+				return EXIT_SUCCESS;
+			}
+
+			if (args.bit_file.empty()) {
+				printError("No bitstream file specified");
+				return EXIT_FAILURE;
+			}
+
+			if (write_flash)
+				tt.program_flash();
+			else
+				tt.program_sram();
+		} catch (std::exception &e) {
+			printError("TT MicroPython failed: " + string(e.what()));
+			return EXIT_FAILURE;
+		}
+
+		return EXIT_SUCCESS;
+#else
+		printError("TinyTapeout MicroPython support: disabled at build time");
 		return EXIT_FAILURE;
 #endif
 	}
@@ -634,7 +812,13 @@ int main(int argc, char **argv)
 
 	/* detect/display flash */
 	if (args.detect_flash != 0) {
-		fpga->detect_flash();
+		if (!fpga->detect_flash(args.flash_info) ||
+				(!args.flash_info_json.empty() &&
+				 !write_flash_info_json(args.flash_info_json))) {
+			delete(fpga);
+			delete(jtag);
+			return EXIT_FAILURE;
+		}
 	}
 
 	if (args.prg_type == Device::RD_FLASH) {
@@ -765,8 +949,12 @@ int spi_comm(struct arguments args, const cable_t &cable,
 		} else if ((args.prg_type == Device::WR_FLASH ||
 					args.prg_type == Device::WR_SRAM) ||
 					!args.bit_file.empty() || !args.file_type.empty()) {
-			if (args.detect_flash)
-				target->detect_flash();
+			if (args.detect_flash) {
+				if (!target->detect_flash(args.flash_info) ||
+						(!args.flash_info_json.empty() &&
+						 !write_flash_info_json(args.flash_info_json)))
+					spi_ret = EXIT_FAILURE;
+			}
 			else
 				target->program(args.offset, args.unprotect_flash);
 		}
@@ -787,6 +975,21 @@ int spi_comm(struct arguments args, const cable_t &cable,
 		}
 
 		SPIFlash flash((SPIInterface *)spi, args.unprotect_flash, args.verbose);
+		if (args.flash_info) {
+			try {
+				flash.display_info();
+			} catch (std::exception &e) {
+				printError("Fail");
+				printError(e.what());
+				delete spi;
+				return EXIT_FAILURE;
+			}
+			if (!args.flash_info_json.empty() &&
+					!write_flash_info_json(args.flash_info_json)) {
+				delete spi;
+				return EXIT_FAILURE;
+			}
+		}
 		flash.display_status_reg();
 
 		if (args.prg_type != Device::RD_FLASH &&
@@ -845,6 +1048,126 @@ int spi_comm(struct arguments args, const cable_t &cable,
 	delete spi;
 
 	return spi_ret;
+}
+#endif
+
+#ifdef ENABLE_LIBGPIOD
+/* iCE40 SRAM load as an SPI slave over host GPIO lines (libgpiod). SRAM
+ * only: the flash sharing the bus is held off it, never read or written.
+ */
+int gpio_spi_comm(struct arguments args,
+	const jtag_pins_conf_t *pins_config, target_board_t *board)
+{
+	if (!board || board->manufacturer != "lattice" ||
+			board->fpga_part != "ice40") {
+		printError("Error: the libgpiod cable in SPI mode loads an iCE40's "
+			"SRAM only: give its board with -b (fomu_evt_header)");
+		return EXIT_FAILURE;
+	}
+	/* only a board wired to GPIO lines (SPI_GPIO_BOARD) gives GPIO numbers:
+	 * any other board's pins are FTDI masks, which as GPIO numbers would
+	 * drive unrelated lines
+	 */
+	if (board->cable_name != "libgpiod") {
+		printError("Error: board " + args.board + " is not wired to GPIO "
+			"lines: its pins are " + board->cable_name + " pin masks, not "
+			"GPIO numbers, so the libgpiod cable cannot use them");
+		return EXIT_FAILURE;
+	}
+#ifndef ENABLE_ICE40_SUPPORT
+	(void)args; (void)pins_config;
+	printError("Support for ICE40 FPGAs was not enabled at compile time");
+	return EXIT_FAILURE;
+#else
+	if (args.prg_type == Device::PRG_NONE)
+		args.prg_type = Device::WR_SRAM;
+	if (args.prg_type != Device::WR_SRAM || args.detect ||
+			args.detect_flash || args.protect_flash ||
+			args.unprotect_flash || args.bulk_erase_flash ||
+			args.enable_quad || args.disable_quad || args.reset) {
+		printError("Error: board " + args.board + " (libgpiod cable): only "
+			"an SRAM load is supported; the flash is never accessed");
+		return EXIT_FAILURE;
+	}
+	if (args.verify) {
+		printError("Error: an iCE40 SRAM load cannot be read back to verify; "
+			"CDONE is checked instead");
+		return EXIT_FAILURE;
+	}
+	if (args.bit_file.empty()) {
+		printError("Error: no bitstream file");
+		return EXIT_FAILURE;
+	}
+	/* options this load would otherwise ignore */
+	if (args.freq_given) {
+		printError("Error: --freq: the GPIO bit-bang runs as fast as the host "
+			"can; it cannot be set, only measured (and it must be 1 to "
+			"25 MHz)");
+		return EXIT_FAILURE;
+	}
+	if (args.offset != 0) {
+		printError("Error: --offset: an SRAM load has no offset");
+		return EXIT_FAILURE;
+	}
+	if (!args.secondary_bit_file.empty()) {
+		printError("Error: --secondary-bitstream: an SRAM load takes one "
+			"bitstream");
+		return EXIT_FAILURE;
+	}
+
+	ice40_gpio_pins_t pins;
+	pins.creset = board->reset_pin;
+	pins.cdone = board->done_pin;
+	pins.si = board->spi_pins_config.mosi_pin;
+	pins.so = board->spi_pins_config.miso_pin;
+	pins.sck = board->spi_pins_config.sck_pin;
+	pins.ss = board->spi_pins_config.cs_pin;
+	pins.holdn = (board->spi_pins_config.holdn_pin == GPIO_NC) ?
+		-1 : board->spi_pins_config.holdn_pin;
+	/* the board's SPI configuration flash shares the iCE40's SPI bus */
+	pins.flash = board->spi_bpi == SPI_FLASH;
+	if (args.pin_config) {
+		/* MOSI:MISO:SCK:CS[:HOLDN], MOSI being the host's output into the
+		 * iCE40's SPI_SI
+		 */
+		if (args.pin_count > 5) {
+			printError("Error: --pins for board " + args.board +
+				" is MOSI:MISO:SCK:CS[:HOLDN] (no WPN)");
+			return EXIT_FAILURE;
+		}
+		printInfo("Board default pins configuration overridden");
+		pins.si = pins_config->tdi_pin;
+		pins.so = pins_config->tdo_pin;
+		pins.sck = pins_config->tck_pin;
+		pins.ss = pins_config->tms_pin;
+		pins.holdn = (args.pin_count == 5) ? pins_config->ext0_pin : -1;
+	}
+
+	try {
+		/* the GPIO registers of a BCM283x Raspberry Pi 1-4 through
+		 * /dev/gpiomem (fast enough for the iCE40's 1 MHz minimum clock),
+		 * else libgpiod; never libgpiod when /dev/gpiomem is what that
+		 * host needs and cannot be had
+		 */
+		GpiomemIce40Spi::Choice choice =
+			GpiomemIce40Spi::select(!args.device.empty());
+		printInfo(std::string("iCE40 SPI load through ") +
+			(choice.gpiomem ? "/dev/gpiomem registers" : "libgpiod") +
+			": " + choice.why);
+		std::unique_ptr<Ice40SpiSlaveInterface> gpio;
+		if (choice.gpiomem)
+			gpio.reset(new GpiomemIce40Spi(pins,
+				GpiomemIce40Spi::open_gpiomem(), args.verbose));
+		else
+			gpio.reset(new LibgpiodIce40Spi(pins, args.device, args.verbose));
+		Ice40 target(gpio.get(), args.bit_file, args.file_type, args.verbose);
+		target.program(0, false);
+	} catch (std::exception &e) {
+		printError("Error: iCE40 SRAM load failed: " + std::string(e.what()));
+		return EXIT_FAILURE;
+	}
+	return EXIT_SUCCESS;
+#endif
 }
 #endif
 
@@ -933,6 +1256,12 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 				cxxopts::value<bool>(args->detect))
 			("dfu",   "DFU mode", cxxopts::value<bool>(args->dfu))
 			("dump-flash",  "Dump flash mode")
+			("flash-info",  "display detailed SPI flash information "
+				"(manufacturer, part, size, unique ID, SFDP read modes)",
+				cxxopts::value<bool>(args->flash_info))
+			("flash-info-json", "as --flash-info, and write the information "
+				"to a JSON file (only when every read succeeded)",
+				cxxopts::value<std::string>(args->flash_info_json))
 			("bulk-erase",   "Bulk erase flash",
 				cxxopts::value<bool>(args->bulk_erase_flash))
 			("enable-quad",   "Enable quad mode for SPI Flash",
@@ -1109,6 +1438,7 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 				return -1;
 			}
 			args->freq = static_cast<uint32_t>(freq);
+			args->freq_given = true;
 		}
 
 		if (result.count("status-pin")) {
@@ -1178,10 +1508,23 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 					pin_num = pins_list[pins[i]];
 				}
 
+				/* the fields are 8 bits: a larger value would be truncated
+				 * to another pin
+				 */
+				if (pin_num < 0 || pin_num > 255) {
+					printError("Error: --pins: " + pins[i] +
+						" is outside 0 to 255");
+					return -1;
+				}
 				*pin_fields[i] = pin_num;
 			}
 			args->pin_config = true;
+			args->pin_count = pins.size();
 		}
+
+		// --flash-info-json implies --flash-info
+		if (!args->flash_info_json.empty())
+			args->flash_info = true;
 
 		if (args->target_flash == "both" || args->target_flash == "secondary") {
 			if ((args->prg_type == Device::WR_FLASH || args->prg_type == Device::RD_FLASH) &&
@@ -1189,7 +1532,8 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 				 !args->protect_flash &&
 				 !args->unprotect_flash &&
 				 !args->bulk_erase_flash &&
-				 !args->detect
+				 !args->detect &&
+				 !args->flash_info
 				) {
 				printError("Error: secondary bitfile not specified");
 				cout << options.help() << endl;
@@ -1213,6 +1557,7 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 			args->mcufw.empty() &&
 			!args->is_list_command &&
 			!args->detect &&
+			!args->flash_info &&
 			!args->protect_flash &&
 			!args->unprotect_flash &&
 			!args->enable_quad &&
@@ -1227,6 +1572,12 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 			printError("Error: bitfile not specified");
 			cout << options.help() << endl;
 			return -1;
+		}
+
+		// --flash-info: same as --detect -f with more details
+		if (args->flash_info) {
+			args->detect = true;
+			args->prg_type = Device::WR_FLASH;
 		}
 
 		// user ask detect with flash set

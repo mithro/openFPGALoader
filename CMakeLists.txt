@@ -2,7 +2,11 @@ cmake_minimum_required(VERSION 3.10)
 
 # set the project name
 project(openFPGALoader VERSION "1.1.1" LANGUAGES CXX)
-add_definitions(-DVERSION=\"v${PROJECT_VERSION}\")
+# Distributors carrying local patches set this so --Version says which
+# build a bug report comes from, e.g. -DOPENFPGALOADER_VERSION=v1.1.1+distro.3
+set(OPENFPGALOADER_VERSION "v${PROJECT_VERSION}" CACHE STRING
+	"version string reported by --Version")
+add_definitions(-DVERSION=\"${OPENFPGALOADER_VERSION}\")
 
 #if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
 #	set(WINDOWS_CROSSCOMPILE ON)
@@ -51,11 +55,20 @@ option(ENABLE_DFU              "enable DFU support (requires libUSB)"         ${
 option(ENABLE_FTDI_BASED_CABLE "enable cables based on FTDI (requires libFTDI" ${ENABLE_CABLE_ALL})
 option(ENABLE_GOWIN_GWU2X      "enable Gowin GWU2X interface"                 ${ENABLE_CABLE_ALL})
 option(ENABLE_SVF_JTAG         "enable SVF support"                           ${ENABLE_CABLE_ALL})
+option(ENABLE_TT_MICROPYTHON   "enable TinyTapeout MicroPython support"       ${ENABLE_CABLE_ALL})
 option(ENABLE_USB_BLASTERI     "enable Altera USB Blaster I support"          ${ENABLE_CABLE_ALL})
 option(ENABLE_USB_BLASTERII    "enable Altera USB Blaster II support"         ${ENABLE_CABLE_ALL})
 
 set(BLASTERII_PATH           "" CACHE STRING "usbBlasterII firmware directory")
 set(ISE_PATH "/opt/Xilinx/14.7" CACHE STRING "ise root directory (default: /opt/Xilinx/14.7)")
+
+# RP1 PIO JTAG (librp1jtag) is only available on Linux (Raspberry Pi 5).
+# Off by default: it needs librp1jtag, which is not in any distribution.
+if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+	option(ENABLE_RP1_PIO "enable Raspberry Pi 5 RP1 PIO JTAG driver (requires librp1jtag)" OFF)
+else()
+	set(ENABLE_RP1_PIO OFF)
+endif()
 
 # Libgpiod is only available on Linux OS.
 if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
@@ -337,6 +350,7 @@ endif()
 list(APPEND OPENFPGALOADER_SOURCE
 	src/bpiFlash.cpp
 	src/spiFlash.cpp
+	src/spiFlashSfdp.cpp
 	src/spiInterface.cpp
 	src/epcq.cpp
 	src/jtag.cpp
@@ -348,6 +362,7 @@ list(APPEND OPENFPGALOADER_HEADERS
 	src/jtagInterface.hpp
 	src/spiFlash.hpp
 	src/spiFlashdb.hpp
+	src/spiFlashSfdp.hpp
 	src/epcq.hpp
 	src/spiInterface.hpp
 )
@@ -409,7 +424,7 @@ if (${USE_LIBFTDI})
 	# ICE40 Driver.
 	if (ENABLE_ICE40_SUPPORT)
 		list(APPEND OPENFPGALOADER_SOURCE  src/ice40.cpp)
-		list(APPEND OPENFPGALOADER_HEADERS src/ice40.hpp)
+		list(APPEND OPENFPGALOADER_HEADERS src/ice40.hpp src/ice40SpiSlaveInterface.hpp)
 		add_definitions(-DENABLE_ICE40_SUPPORT=1)
 		message("ICE40 support enabled")
 	else()
@@ -573,10 +588,19 @@ list(APPEND OPENFPGALOADER_SOURCE  src/jlink.cpp)
 list(APPEND OPENFPGALOADER_HEADERS src/jlink.hpp)
 endif()
 
+# RP1 PIO JTAG support
+if (ENABLE_RP1_PIO)
+list(APPEND OPENFPGALOADER_SOURCE  src/rp1PioJtag.cpp)
+list(APPEND OPENFPGALOADER_HEADERS src/rp1PioJtag.hpp)
+endif()
+
 # libGPIOD support
 if (ENABLE_LIBGPIOD)
 list(APPEND OPENFPGALOADER_SOURCE  src/libgpiodJtagBitbang.cpp)
 list(APPEND OPENFPGALOADER_HEADERS src/libgpiodJtagBitbang.hpp)
+# iCE40 SPI slave (SRAM) load over GPIO lines
+list(APPEND OPENFPGALOADER_SOURCE  src/ice40GpioSpi.cpp src/gpiomemIce40Spi.cpp src/libgpiodIce40Spi.cpp)
+list(APPEND OPENFPGALOADER_HEADERS src/ice40GpioSpi.hpp src/gpiomemIce40Spi.hpp src/libgpiodIce40Spi.hpp src/ice40SpiSlaveInterface.hpp)
 endif()
 
 # RemoteBitbang
@@ -590,6 +614,12 @@ if (ENABLE_SVF_JTAG)
 list (APPEND OPENFPGALOADER_SOURCE  src/svf_jtag.cpp)
 list (APPEND OPENFPGALOADER_HEADERS src/svf_jtag.hpp)
 add_definitions(-DENABLE_SVF_JTAG)
+endif()
+
+# TinyTapeout MicroPython
+if (ENABLE_TT_MICROPYTHON)
+list(APPEND OPENFPGALOADER_SOURCE  src/ttMicropython.cpp)
+list(APPEND OPENFPGALOADER_HEADERS src/ttMicropython.hpp)
 endif()
 
 # Xilinx Virtual Cable
@@ -663,6 +693,11 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 
 	target_sources(openFPGALoader PRIVATE src/pathHelper.cpp)
 	list(APPEND OPENFPGALOADER_HEADERS src/pathHelper.hpp)
+
+	# TT MicroPython auto-detection uses SetupDi
+	if (ENABLE_TT_MICROPYTHON)
+		target_link_libraries(openFPGALoader setupapi)
+	endif()
 endif()
 
 # libusb_attach_kernel_driver is only available on Linux.
@@ -675,9 +710,9 @@ if (ENABLE_UDEV)
 	target_link_libraries(openFPGALoader ${LIBUDEV_LIBRARIES})
 endif()
 
-if (ENABLE_UDEV OR ENABLE_LIBGPIOD OR ENABLE_JETSONNANOGPIO)
+if (ENABLE_UDEV OR ENABLE_LIBGPIOD OR ENABLE_JETSONNANOGPIO OR ENABLE_TT_MICROPYTHON)
 	add_definitions(-DUSE_DEVICE_ARG)
-endif(ENABLE_UDEV OR ENABLE_LIBGPIOD OR ENABLE_JETSONNANOGPIO)
+endif(ENABLE_UDEV OR ENABLE_LIBGPIOD OR ENABLE_JETSONNANOGPIO OR ENABLE_TT_MICROPYTHON)
 
 if (BUILD_STATIC)
 	set_target_properties(openFPGALoader PROPERTIES LINK_SEARCH_END_STATIC 1)
@@ -718,6 +753,14 @@ if (ENABLE_DFU)
 	message("DFU support enabled")
 else()
 	message("DFU support disabled")
+endif()
+
+# TinyTapeout MicroPython
+if (ENABLE_TT_MICROPYTHON)
+	add_definitions(-DENABLE_TT_MICROPYTHON=1)
+	message("TinyTapeout MicroPython support enabled")
+else()
+	message("TinyTapeout MicroPython support disabled")
 endif()
 
 # dirtyJtag
@@ -770,6 +813,23 @@ if (ENABLE_LIBGPIOD)
 		message("libgpiod v1 support enabled")
 	endif()
 endif(ENABLE_LIBGPIOD)
+
+# RP1 PIO JTAG support (librp1jtag, found through its rp1jtag.pc).
+if (ENABLE_RP1_PIO)
+	pkg_check_modules(RP1JTAG REQUIRED rp1jtag)
+	include_directories(${RP1JTAG_INCLUDE_DIRS})
+	target_link_directories(openFPGALoader PRIVATE ${RP1JTAG_LIBRARY_DIRS})
+	target_link_libraries(openFPGALoader ${RP1JTAG_LIBRARIES})
+	# A static librp1jtag needs its PIOLib backend linked explicitly.
+	find_library(PIOLIB_LIBRARY pio HINTS ${RP1JTAG_LIBRARY_DIRS})
+	if (PIOLIB_LIBRARY)
+		target_link_libraries(openFPGALoader ${PIOLIB_LIBRARY})
+	endif()
+	add_definitions(-DENABLE_RP1_PIO=1)
+	message("RP1 PIO JTAG support enabled")
+else()
+	message("RP1 PIO JTAG support disabled")
+endif(ENABLE_RP1_PIO)
 
 if (ENABLE_REMOTEBITBANG)
 	add_definitions(-DENABLE_REMOTEBITBANG=1)

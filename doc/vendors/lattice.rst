@@ -73,6 +73,145 @@ Bin file load:
 
 Since it's a direct access to the flash (SPI) the ``-b`` option is required.
 
+SRAM load over host GPIO lines (/dev/gpiomem, libgpiod)
+--------------------------------------------------------
+
+An iCE40 whose SPI configuration port is wired to a Linux host's GPIO lines
+(a Raspberry Pi header) is loaded as an SPI slave (TN-02001 section 13,
+Appendix A) by bit-banging the lines: through the Pi's GPIO registers
+(``/dev/gpiomem``) on a Raspberry Pi 1 to 4, through libgpiod elsewhere (see
+below). This is an SRAM load only, and nothing is written to the flash sharing the bus: with the iCE40
+held in reset the flash is woken (``0xAB``), its status read until it is not
+busy (``0x05``) and put in Deep Power-down (``0xB9``), and its /HOLD is held
+low, so that it ignores the load. Those three are the only flash commands the
+cable can send; ``-f``, ``--verify`` and the flash options are refused. The
+flash is not woken after the load (the SPI pins are then the design's I/O):
+an iCE40 booting from it sends ``0xAB`` itself (TN-02001 9.4), and a loaded
+design that reads it must do the same. The board
+definition gives the GPIO numbers.
+
+The backend is chosen by the host, and logged with the reason (``iCE40 SPI
+load through /dev/gpiomem registers: ...``):
+
+* ``/dev/gpiomem`` when ``/proc/device-tree/compatible`` names
+  ``brcm,bcm2835``, ``brcm,bcm2836``, ``brcm,bcm2837`` or ``brcm,bcm2711``
+  (Raspberry Pi 1 to 4, Zero, Zero 2). One 4 KiB page is mapped read/write and
+  the GPIO registers are written directly: GPFSELn at 0x00-0x14 (3 bits per
+  pin, 000 input, 001 output), GPSET0 at 0x1C, GPCLR0 at 0x28, GPLEV0 at 0x34
+  (BCM2835 ARM Peripherals section 6.1, BCM2711 ARM Peripherals section 5.2),
+  GPIO 0-31 only; the pull registers are never touched. A
+  ``compatible`` that does not exist (not a device-tree host) selects
+  libgpiod; one that exists and cannot be read stops the load.
+  If ``/dev/gpiomem`` is absent or cannot be opened read/write on such a host
+  the load stops and says why (and asks "is the user in the gpio group?"); it
+  does not fall back to libgpiod.
+
+  The kernel knows nothing of these accesses, and does none of its usual
+  cleanup:
+
+  * A pin in an alternate function (SPI0's GPIO8-11, say) is refused instead
+    of taken over, and so is any of the seven lines that is already an
+    output (an earlier load was killed before it put the pins back): the
+    message names the pins and the command that puts them back,
+    ``pinctrl set <n> ip``.
+  * A GPFSEL register holds ten pins. Changing one pin's function is a
+    read-modify-write, and another writer changing a different pin of the same
+    register between the read and the write has its change lost.
+  * Each pin's function is saved before it is first changed and put back, and
+    read back, when the load ends by success, error, SIGINT, SIGTERM, SIGHUP,
+    SIGQUIT or SIGPIPE. CRESET_B is let go only if every bus line read back
+    as saved; if one did not, CRESET_B stays low and the line stays driven,
+    and the load says so and gives the recovery below.
+  * **Every other way out leaves the pins driven**, CRESET_B low (the iCE40
+    held in reset) and the SPI lines out, until they are put back: SIGKILL,
+    SIGSEGV, SIGBUS, SIGABRT, ``abort()``, ``std::terminate()``, ``exit()`` or
+    ``_exit()`` called from elsewhere. libgpiod gives its lines back when
+    the process dies; this path does not. To recover:
+
+    1. Put every line the load drives back to an input. That lets CRESET_B
+       go, and the board's pull-up then lets the iCE40 boot from its flash
+       (as the load itself relies on). For ``fomu_evt_header`` (SPI_SS 8,
+       SPI_SI 9, SPI_SO 10, SPI_SCK 11, /HOLD 25, CRESET_B 27) on a Pi 1-4,
+       the bus lines first and CRESET_B in a second command, so that the
+       bus lines are inputs before the iCE40 leaves reset:
+       ``pinctrl set 8,9,10,11,25 ip``, then ``pinctrl set 27 ip``
+       (``raspi-gpio set <n> ip`` on older images, one pin at a time).
+       With ``--pins`` the first list is the pins given and the second is
+       CRESET_B.
+    2. Check that CDONE (GPIO17) is high again: ``pinctrl get 17``.
+    3. If CDONE stays low, power-cycle the board.
+
+  The SPI_SCK period is padded to 50 ns or more, each phase to 25 ns or
+  more, so the clock is at or under 20 MHz; the data sheet allows 25 MHz and
+  asks 20 ns or more for the SCK high and low times (DS-02008 Table 4.24).
+  The padding is calibrated once, before any pin is driven or changed (so a
+  host that cannot load stops with the board's design still running), from
+  register writes that move no pin, at the CPU clock cpufreq reports, and
+  scaled to the CPU's maximum clock (every cost is taken to be CPU-bound, so
+  it is shorter there). The load also checks that, scaled to the CPU's minimum clock
+  (``cpuinfo_min_freq``), a bit still takes 1 us or less, so that 1 MHz stays
+  reachable; if cpufreq cannot be read, or a bit would take longer, the load
+  stops before it drives anything. This assumes the register writes are
+  posted and reach the pins no sooner than the CPU issues them, so spacing the writes
+  spaces the edges at least as far apart. Nothing here can check that: only
+  a measurement on the hardware shows the real rate and edge spacing. The 1 to 25 MHz
+  check below remains the authority on the mean.
+* libgpiod on any other host (a Pi 5, whose RP1 has no such registers, for
+  one), and whenever ``-d /dev/gpiochipN`` names a chip; without ``-d`` the
+  chip is the one labelled ``pinctrl-rp1`` (Pi 5), ``pinctrl-bcm2711`` (Pi 4)
+  or ``pinctrl-bcm2835`` (Pi 1-3).
+
+The Fomu EVT on a Raspberry Pi header (BCM GPIO numbers):
+
+============= ===================== ===================================
+   Pi GPIO     Fomu EVT              load
+============= ===================== ===================================
+27            CRESET_B              held low, then let go
+17            CDONE                 read
+8             SPI_SS, flash /CS     driven
+11            SPI_SCK, flash CLK    driven
+9             SPI_SI, flash DO      driven (the Pi's MISO pin)
+10            SPI_SO, flash DI      flash commands in reset, then input
+25            flash /HOLD (SPI_IO3) high for those, low for the load
+============= ===================== ===================================
+
+.. code-block:: bash
+
+    openFPGALoader -b fomu_evt_header design.bin
+
+``--pins MOSI:MISO:SCK:CS[:HOLDN]`` overrides the SPI lines, ``MOSI`` being
+the host's output into the iCE40's SPI_SI (``9:10:11:8:25`` for the Fomu EVT).
+
+.. WARNING::
+  The iCE40 needs a slave configuration clock of 1 to 25 MHz (DS-02008
+  Table 4.24). On a Pi 3 Model B+ libgpiod (one or two system calls per
+  clock edge) was measured at 0.440 MHz, under the minimum, and the load
+  stopped with that rate: libgpiod cannot do this load on that host, which is
+  why ``/dev/gpiomem`` is used there. The ``/dev/gpiomem`` path has not been
+  tried on hardware, and its edge spacing rests on the assumption stated
+  above. If a load's clock falls outside 1 to 25 MHz the load stops with the
+  measured rate, and the iCE40 boots its flash again. Nothing here says the
+  load succeeds on any Pi.
+
+The load needs a configured iCE40 to start from (CDONE high: it proves, by
+CDONE falling under CRESET_B, that an iCE40 is held on that reset before any
+bus line is driven), and checks CDONE high after the image. The SPI_SCK rate
+is measured for every 4 KiB of the image and over the whole image; outside
+1 to 25 MHz the load stops (a stall that pulls the rate of one 4 KiB chunk
+under 1 MHz stops it too: Table A.1 asks for a continuous clock).
+``--freq`` and ``--offset`` are refused: the rate cannot be set, only
+measured. After a failure the lines are released and the iCE40
+is reset to boot from its flash again.
+
+SIGINT, SIGTERM, SIGHUP, SIGQUIT and SIGPIPE stop the load at the next bit
+and take the same path: the lines released, the iCE40 reset to boot from its
+flash, CDONE checked, a non-zero exit. SIGKILL cannot be caught: a load killed
+with it leaves the iCE40 unconfigured (CDONE low). With libgpiod the kernel
+gives the lines back and every later load refuses to start until the board is power-cycled; with ``/dev/gpiomem`` the pins also
+stay driven (see above). A caller that needs a time limit must send SIGTERM
+and give the recovery time before any SIGKILL, for example
+``timeout -k 30 120 openFPGALoader ...`` (never ``timeout -s KILL``).
+
 ECP5/ECP3/Certus-NX/CertusPro-NX/Crosslink-NX
 =============================================
 

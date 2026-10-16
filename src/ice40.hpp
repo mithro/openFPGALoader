@@ -11,6 +11,7 @@
 #include "device.hpp"
 #include "ftdispi.hpp"
 #include "spiInterface.hpp"
+#include "ice40SpiSlaveInterface.hpp"
 
 class Ice40: public Device, SPIInterface {
 	public:
@@ -19,12 +20,19 @@ class Ice40: public Device, SPIInterface {
 			Device::prog_type_t prg_type,
 			uint16_t rst_pin, uint16_t done_pin,
 			bool verify, int8_t verbose);
+		/*!
+		 * \brief SRAM load only, as an SPI slave, over any cable giving the
+		 *        lines of an Ice40SpiSlaveInterface (no flash access)
+		 */
+		Ice40(Ice40SpiSlaveInterface *slave, const std::string &filename,
+			const std::string &file_type, int8_t verbose);
 		~Ice40();
 
 		void program(unsigned int offset, bool unprotect_flash) override;
 		bool program_cram(const uint8_t *data, uint32_t length);
+		void program_cram_slave(const uint8_t *data, uint32_t length);
 		bool dumpFlash(uint32_t base_addr, uint32_t len) override;
-		bool detect_flash() override;
+		bool detect_flash(bool full_info) override;
 		bool protect_flash(uint32_t len) override;
 		bool unprotect_flash() override;
 		bool bulk_erase_flash() override;
@@ -58,7 +66,13 @@ class Ice40: public Device, SPIInterface {
 		bool post_flash_access() override;
 
 	private:
+		bool flash_access_unsupported();
+		void program_slave();
+		std::string recover_slave(bool slave_mode);
+		std::string let_go_reset();
+
 		FtdiSpi *_spi;
+		Ice40SpiSlaveInterface *_slave;
 		uint16_t _rst_pin;
 		uint16_t _done_pin;
 };

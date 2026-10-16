@@ -394,6 +394,13 @@
   Flash: OK
   Constraints: Fomu-PVT
 
+- ID: fomu_evt_header
+  Description: Fomu EVT on a Raspberry Pi header (SPI slave SRAM load over GPIO: the GPIO registers through /dev/gpiomem on a Pi 1-4, libgpiod elsewhere; untested on hardware)
+  URL: https://github.com/im-tomu/fomu-hardware/tree/evt
+  FPGA: iCE40UltraPlus UP5K
+  Memory: NT
+  Flash: NA
+
 - ID: gr740-mini
   Description: GR740-MINI
   URL: https://gaisler.com/index.php/products/boards/gr740-mini
@@ -586,6 +593,20 @@
   FPGA: Artix xc7a50tfgg484
   Memory: OK
   Flash: OK
+
+- ID: netv2
+  Description: Kosagi NeTV2 (XC7A35T) on a Raspberry Pi header (GPIO JTAG)
+  URL: https://www.crowdsupply.com/alphamax/netv2
+  FPGA: Artix xc7a35tfgg484
+  Memory: OK
+  Flash: NT
+
+- ID: netv2_100
+  Description: Kosagi NeTV2 (XC7A100T) on a Raspberry Pi header (GPIO JTAG)
+  URL: https://www.crowdsupply.com/alphamax/netv2
+  FPGA: Artix xc7a100tfgg484
+  Memory: NT
+  Flash: NT
 
 - ID: nexys_a7_50
   Description: Digilent Nexys A7(Nexys 4 DDR)
@@ -833,6 +854,13 @@
   FPGA: XC7A200TFBG484
   Memory: OK
   Flash: OK
+
+- ID: tt_fpga
+  Description: Tiny Tapeout FPGA Demo Board (TTDBv3), configured through its RP2350B running MicroPython
+  URL: https://tinytapeout.com/
+  FPGA: iCE40UltraPlus UP5K
+  Memory: OK
+  Flash: NA
 
 - ID: tec0117
   Description: Trenz Gowin LittleBee (TEC0117)

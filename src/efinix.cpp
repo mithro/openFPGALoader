@@ -254,10 +254,10 @@ void Efinix::program(unsigned int offset, bool unprotect_flash)
 	delete bit;
 }
 
-bool Efinix::detect_flash()
+bool Efinix::detect_flash(bool full_info)
 {
 	if (_jtag) {
-		return SPIInterface::detect_flash();
+		return SPIInterface::detect_flash(full_info);
 	}
 
 #if 0
@@ -265,7 +265,7 @@ bool Efinix::detect_flash()
 	 * uncomment it and submit a PR!  */
 	_spi->gpio_clear(_rst_pin);
 
-	bool rv = reinterpret_cast<SPIInterface *>(_spi)->detect_flash();
+	bool rv = reinterpret_cast<SPIInterface *>(_spi)->detect_flash(full_info);
 
 	reset();
 

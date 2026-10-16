@@ -83,6 +83,113 @@ Writing to an arbitrary address in flash memory
 With FPGA using an external SPI flash (*xilinx*, *lattice ECP5/nexus/ice40*, *anlogic*, *efinix*) option ``-o`` allows
 one to write raw binary file to an arbitrary adress in FLASH.
 
+Display detailed SPI flash information
+======================================
+
+``--flash-info`` works like ``--detect -f`` but also displays:
+
+* manufacturer, part name and size (from the internal database, SFDP or the JEDEC ID),
+* factory programmed unique ID / serial number when the manufacturer provides one
+  (Winbond, GigaDevice, ISSI, Puya, Micron N25Q/MT25Q, Spansion S25FL127S/128S/256S,
+  Infineon S25FL-L, SST26, and Macronix when its secured OTP holds a factory
+  programmed ESN: most Macronix parts ship without one, and the report then
+  says so, from the security register),
+* the JEDEC SFDP (JESD216) content: supported read modes (1-1-2, 1-2-2, 2-2-2,
+  1-1-4, 1-4-4, 4-4-4) with opcodes and dummy clocks, DTR (DDR) support,
+  4-Byte address and DTR read instructions, erase types, page size and
+  quad enable method.
+
+.. code-block:: bash
+
+    openFPGALoader -b arty --flash-info
+
+No command that writes or erases the flash is sent (a Macronix part's
+secured OTP is entered and left again to read its ESN).
+
+The report is not displayed, and openFPGALoader exits with an error, when
+the JEDEC ID is not a valid one (manufacturer code failing JEP106 odd
+parity) or is not the same when read twice: this happens when the flash
+is not really reached (ie SPI bridge not loaded).
+
+For scripts, ``--flash-info-json FILE`` does the same and also writes the
+information to ``FILE`` as JSON. The file is only written when every flash
+access succeeded (a previous ``FILE`` is removed at start), so an existing
+file and a zero exit status mean the content was read:
+
+.. code-block:: json
+
+    {"format": "openFPGALoader-flash-info", "version": 2, "flashes": [
+      {"jedec_id": "0x010219", "manufacturer_id": "0x01", "memory_type": "0x02",
+       "capacity": "0x19", "manufacturer": "Spansion",
+       "manufacturer_jep106": "Spansion / Cypress / Infineon",
+       "part": "S25FL256S", "extended_id": "0x4d0180",
+       "size_bytes": 33554432, "size_source": "database",
+       "unique_id": {"state": "read", "value": "e2789916a0809a22bbc76634c1bf53ed",
+                     "bits": 128, "opcode": "0x4b", "note": null},
+       "sfdp": null}]}
+
+``flashes`` has one entry per flash (two with ``--target-flash both``).
+``sfdp`` holds the tables, ``bfpt`` (density, address mode, DTR, page size,
+read modes with opcode and mode/dummy clocks, erase types, quad enable) and
+``read_4byte``. RSFDP (``0x5A``) is always sent, and ``sfdp`` is ``null``
+only when its answer has no ``SFDP`` signature, so the part does not
+implement it. A failed SFDP read is an error: no file is written.
+
+``unique_id.state`` is one of:
+
+* ``read``: a factory programmed unique ID was read (``value``, ``bits``,
+  ``opcode``).
+* ``blank``: the part has a known unique ID command, the read succeeded
+  but returned all ``0x00`` or all ``0xFF``: this is not an ID.
+* ``none`` with a ``note``: the part has no factory unique ID, as read from
+  the chip itself (ie a Macronix part whose security register says no ESN
+  was programmed). ``note`` is ``<fact>: <evidence>``: the text before the
+  first colon is a self-contained statement (``no factory ESN``), the rest
+  the register value it was read from.
+* ``none`` with a ``null`` note: openFPGALoader knows no unique ID command
+  for this part (unknown manufacturer or family). This says nothing about
+  the silicon, which may have one.
+
+A failed unique ID read is an error, never a ``state``: no file is written.
+
+``extended_id`` is ``null``, or RDID (``0x9F``) bytes 4-6 as ``"0x......"``
+for the families that define bytes after the 3-byte JEDEC ID (the bytes
+Linux spi-nor also uses to tell parts apart):
+
+* Micron N25Q / MT25Q: a length (``0x10``) then the 2-byte extended device ID
+  (ie ``0x104400`` on MT25Q "a" parts),
+* Spansion / Cypress / Infineon S25FL-S, S25FS-S, S25FL-P, S25SL and SEMPER:
+  for S-family parts the ID-CFI length (``0x4d``), the sector architecture
+  (``00``: uniform 256 KiB sectors, ``01``: 4 KiB parameter + 64 KiB
+  sectors) and the family (``80``: FL-S, ``81``: FS-S).
+
+For every other part the RDID bytes after the JEDEC ID are not defined, and
+``extended_id`` is ``null``.
+
+``part`` and ``size_bytes`` with ``"size_source": "database"`` come from the
+internal database for this JEDEC ID, not from the chip: several parts may
+share one ID (ie ``0xc22017`` is used by more than one Macronix 64 Mbit part).
+The values read from the chip are the JEDEC ID fields, ``extended_id``,
+``unique_id`` and ``sfdp``.
+
+``format`` is always ``openFPGALoader-flash-info``, and ``version`` is
+increased whenever a field is renamed, removed or changes meaning, so a
+consumer should refuse a ``format`` or ``version`` it does not know. New
+fields may be added without a new ``version``: ignore unknown fields. The
+openFPGALoader version string does not tell whether ``--flash-info`` is
+available: check for ``--flash-info-json`` in ``--help`` instead.
+
+The current ``version`` is 2. Earlier builds of this option, distributed
+before it was proposed here, wrote version 1, in which ``sfdp`` could also
+be ``null`` after a failed SFDP read and ``extended_id`` was absent; a
+consumer that accepts version 1 must treat its ``null`` ``sfdp`` as unknown.
+
+.. NOTE::
+  On FPGAs where the flash is only reachable through the FPGA (ie Xilinx,
+  through a *spiOverJtag* bridge), every ``--flash-info`` read, including the
+  JEDEC ID, replaces the running design with the bridge, then the FPGA is
+  reloaded from flash.
+
 Detect/read/write on primary/secondary flash memories
 =====================================================
 
