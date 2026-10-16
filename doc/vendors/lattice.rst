@@ -120,7 +120,8 @@ load through /dev/gpiomem registers: ...``):
   * Each pin's function is saved before it is first changed and put back, and
     read back, when the load ends by success, error, SIGINT, SIGTERM, SIGHUP,
     SIGQUIT or SIGPIPE. CRESET_B is let go only if every bus line read back
-    as saved.
+    as saved; if one did not, CRESET_B stays low and the line stays driven,
+    and the load says so and gives the recovery below.
   * **Every other way out leaves the pins driven**, CRESET_B low (the iCE40
     held in reset) and the SPI lines out, until they are put back: SIGKILL,
     SIGSEGV, SIGBUS, SIGABRT, ``abort()``, ``std::terminate()``, ``exit()`` or
@@ -133,20 +134,22 @@ load through /dev/gpiomem registers: ...``):
        SPI_SI 9, SPI_SO 10, SPI_SCK 11, /HOLD 25, CRESET_B 27) on a Pi 1-4:
        ``pinctrl set 8,9,10,11,25,27 ip`` (``raspi-gpio set <n> ip`` on
        older images, one pin at a time). With ``--pins`` the list is the
-       pins given, plus CRESET_B.
+       pins given, plus CRESET_B; give CRESET_B in its own second command,
+       so that the bus lines are inputs before the iCE40 leaves reset.
     2. Check that CDONE (GPIO17) is high again: ``pinctrl get 17``.
     3. If CDONE stays low, power-cycle the board.
 
   The SPI_SCK period is padded to 50 ns or more, each phase to 25 ns or
   more, so the clock is at or under 20 MHz; the data sheet allows 25 MHz and
   asks 20 ns or more for the SCK high and low times (DS-02008 Table 4.24).
-  The padding is calibrated once, just before the image, from register
-  writes that move no pin, at the CPU clock cpufreq reports, and scaled to the
+  The padding is calibrated once, before anything is read or driven (so a
+  host that cannot load stops with the board's design still running), from
+  register writes that move no pin, at the CPU clock cpufreq reports, and scaled to the
   CPU's maximum clock (every cost is taken to be CPU-bound, so it is shorter
   there). The load also checks that, scaled to the CPU's minimum clock
   (``cpuinfo_min_freq``), a bit still takes 1 us or less, so that 1 MHz stays
   reachable; if cpufreq cannot be read, or a bit would take longer, the load
-  stops before the image. This assumes the register writes are posted and
+  stops before it drives anything. This assumes the register writes are posted and
   reach the pins no sooner than the CPU issues them, so spacing the writes
   spaces the edges at least as far apart. Nothing here can check that: the
   hardware trial measures the real rate and edge spacing. The 1 to 25 MHz
