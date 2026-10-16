@@ -142,15 +142,15 @@ load through /dev/gpiomem registers: ...``):
   The SPI_SCK period is padded to 50 ns or more, each phase to 25 ns or
   more, so the clock is at or under 20 MHz; the data sheet allows 25 MHz and
   asks 20 ns or more for the SCK high and low times (DS-02008 Table 4.24).
-  The padding is calibrated once, before anything is read or driven (so a
+  The padding is calibrated once, before any pin is driven or changed (so a
   host that cannot load stops with the board's design still running), from
-  register writes that move no pin, at the CPU clock cpufreq reports, and scaled to the
-  CPU's maximum clock (every cost is taken to be CPU-bound, so it is shorter
-  there). The load also checks that, scaled to the CPU's minimum clock
+  register writes that move no pin, at the CPU clock cpufreq reports, and
+  scaled to the CPU's maximum clock (every cost is taken to be CPU-bound, so
+  it is shorter there). The load also checks that, scaled to the CPU's minimum clock
   (``cpuinfo_min_freq``), a bit still takes 1 us or less, so that 1 MHz stays
   reachable; if cpufreq cannot be read, or a bit would take longer, the load
-  stops before it drives anything. This assumes the register writes are posted and
-  reach the pins no sooner than the CPU issues them, so spacing the writes
+  stops before it drives anything. This assumes the register writes are
+  posted and reach the pins no sooner than the CPU issues them, so spacing the writes
   spaces the edges at least as far apart. Nothing here can check that: the
   hardware trial measures the real rate and edge spacing. The 1 to 25 MHz
   check below remains the authority on the mean.
