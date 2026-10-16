@@ -28,7 +28,7 @@ class FlashInterface {
 			bool skip_reset = false);
 	virtual ~FlashInterface() {}
 
-	bool detect_flash();
+	bool detect_flash(bool full_info = false);
 	bool protect_flash(uint32_t len);
 	bool unprotect_flash();
 	bool set_quad_bit(bool set_quad);

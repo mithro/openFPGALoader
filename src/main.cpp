@@ -132,6 +132,8 @@ struct arguments {
 	bool read_xadc;
 	std::string read_register;
 	std::string user_flash;
+	bool flash_info;
+	std::string flash_info_json;
 };
 
 int run_xvc_server(const struct arguments &args, const cable_t &cable,
@@ -146,6 +148,36 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 	jtag_pins_conf_t *pins_config);
 
 void displaySupported(const struct arguments &args);
+
+/* --flash-info-json: write every SPIFlash::display_info() record, only
+ * called when all flash accesses succeeded
+ */
+static bool write_flash_info_json(const std::string &path)
+{
+	const std::vector<std::string> &recs = SPIFlash::info_json_records();
+	if (recs.empty()) {
+		printError("Error: no SPI flash information to write");
+		return false;
+	}
+	std::string j = "{\"format\": \"openFPGALoader-flash-info\", "
+		"\"version\": 2, \"flashes\": [";
+	for (size_t i = 0; i < recs.size(); i++)
+		j += (i ? ", " : "") + recs[i];
+	j += "]}\n";
+
+	/* write + rename: path never holds a partial file */
+	const std::string tmp = path + ".tmp";
+	std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+	out << j;
+	out.close();
+	if (!out || rename(tmp.c_str(), path.c_str()) != 0) {
+		printError("Error: failed to write " + path);
+		remove(tmp.c_str());
+		return false;
+	}
+	printInfo("SPI flash information written to " + path);
+	return true;
+}
 
 int main(int argc, char **argv)
 {
@@ -172,7 +204,9 @@ int main(int argc, char **argv)
 			false, 3721, "-",
 			"", false, {},  // mcufw conmcu, user_misc_dev_list
 			false, false, "", // read_dna, read_xadc, read_register
-			"" // user_flash
+			"", // user_flash
+			false, // flash_info
+			"" // flash_info_json
 	};
 	/* parse arguments */
 	int ret = parse_opt(argc, argv, &args, &pins_config);
@@ -181,6 +215,10 @@ int main(int argc, char **argv)
 
 	if (args.force_terminal_mode)
 		ProgressBar::setForceTerminalMode();
+
+	/* a failed run must not leave a previous run's file behind */
+	if (!args.flash_info_json.empty())
+		remove(args.flash_info_json.c_str());
 
 	if (args.is_list_command) {
 		displaySupported(args);
@@ -676,7 +714,13 @@ int main(int argc, char **argv)
 
 	/* detect/display flash */
 	if (args.detect_flash != 0) {
-		fpga->detect_flash();
+		if (!fpga->detect_flash(args.flash_info) ||
+				(!args.flash_info_json.empty() &&
+				 !write_flash_info_json(args.flash_info_json))) {
+			delete(fpga);
+			delete(jtag);
+			return EXIT_FAILURE;
+		}
 	}
 
 	if (args.prg_type == Device::RD_FLASH) {
@@ -807,8 +851,12 @@ int spi_comm(struct arguments args, const cable_t &cable,
 		} else if ((args.prg_type == Device::WR_FLASH ||
 					args.prg_type == Device::WR_SRAM) ||
 					!args.bit_file.empty() || !args.file_type.empty()) {
-			if (args.detect_flash)
-				target->detect_flash();
+			if (args.detect_flash) {
+				if (!target->detect_flash(args.flash_info) ||
+						(!args.flash_info_json.empty() &&
+						 !write_flash_info_json(args.flash_info_json)))
+					spi_ret = EXIT_FAILURE;
+			}
 			else
 				target->program(args.offset, args.unprotect_flash);
 		}
@@ -829,6 +877,21 @@ int spi_comm(struct arguments args, const cable_t &cable,
 		}
 
 		SPIFlash flash((FlashInterface *)spi, args.unprotect_flash, args.verbose);
+		if (args.flash_info) {
+			try {
+				flash.display_info();
+			} catch (std::exception &e) {
+				printError("Fail");
+				printError(e.what());
+				delete spi;
+				return EXIT_FAILURE;
+			}
+			if (!args.flash_info_json.empty() &&
+					!write_flash_info_json(args.flash_info_json)) {
+				delete spi;
+				return EXIT_FAILURE;
+			}
+		}
 		flash.display_status_reg();
 
 		if (args.prg_type != Device::RD_FLASH &&
@@ -978,6 +1041,12 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 			("passive-serial", "USB-Blaster passive serial mode",
 				cxxopts::value<bool>(args->passive_serial))
 			("dump-flash",  "Dump flash mode")
+			("flash-info",  "display detailed SPI flash information "
+				"(manufacturer, part, size, unique ID, SFDP read modes)",
+				cxxopts::value<bool>(args->flash_info))
+			("flash-info-json", "as --flash-info, and write the information "
+				"to a JSON file (only when every read succeeded)",
+				cxxopts::value<std::string>(args->flash_info_json))
 			("bulk-erase",   "Bulk erase flash",
 				cxxopts::value<bool>(args->bulk_erase_flash))
 			("enable-quad",   "Enable quad mode for SPI Flash",
@@ -1248,13 +1317,18 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 			args->pin_config = true;
 		}
 
+		// --flash-info-json implies --flash-info
+		if (!args->flash_info_json.empty())
+			args->flash_info = true;
+
 		if (args->target_flash == "both" || args->target_flash == "secondary") {
 			if ((args->prg_type == Device::WR_FLASH || args->prg_type == Device::RD_FLASH) &&
 				 args->secondary_bit_file.empty() &&
 				 !args->protect_flash &&
 				 !args->unprotect_flash &&
 				 !args->bulk_erase_flash &&
-				 !args->detect
+				 !args->detect &&
+				 !args->flash_info
 				) {
 				printError("Error: secondary bitfile not specified");
 				std::cout << options.help() << std::endl;
@@ -1272,6 +1346,7 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 			args->mcufw.empty() &&
 			!args->is_list_command &&
 			!args->detect &&
+			!args->flash_info &&
 			!args->protect_flash &&
 			!args->unprotect_flash &&
 			!args->enable_quad &&
@@ -1286,6 +1361,12 @@ int parse_opt(int argc, char **argv, struct arguments *args,
 			printError("Error: bitfile not specified");
 			std::cout << options.help() << std::endl;
 			return -1;
+		}
+
+		// --flash-info: same as --detect -f with more details
+		if (args->flash_info) {
+			args->detect = true;
+			args->prg_type = Device::WR_FLASH;
 		}
 
 		// user ask detect with flash set

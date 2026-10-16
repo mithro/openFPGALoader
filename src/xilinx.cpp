@@ -1379,9 +1379,13 @@ bool Xilinx::dumpFlash(uint32_t base_addr, uint32_t len)
 	return true;
 }
 
-bool Xilinx::detect_flash()
+bool Xilinx::detect_flash(bool full_info)
 {
 	if (_is_bpi_board) {
+		if (full_info) {
+			printError("--flash-info is not supported on a BPI flash");
+			return false;
+		}
 		if (!_bpi_flash) {
 			if (!load_bpi_bridge())
 				return false;
@@ -1395,12 +1399,12 @@ bool Xilinx::detect_flash()
 
 	if (_flash_chips & PRIMARY_FLASH) {
 		select_flash_chip(PRIMARY_FLASH);
-		if (!FlashInterface::detect_flash())
+		if (!FlashInterface::detect_flash(full_info))
 			return false;
 	}
 	if (_flash_chips & SECONDARY_FLASH) {
 		select_flash_chip(SECONDARY_FLASH);
-		if (!FlashInterface::detect_flash())
+		if (!FlashInterface::detect_flash(full_info))
 			return false;
 	}
 	return true;
