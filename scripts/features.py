@@ -20,3 +20,8 @@ FEATURES = [
      "iCE40 SRAM load over any SPI slave interface (TN-02001), on host GPIO lines through libgpiod, "
      "or through /dev/gpiomem registers on a Raspberry Pi 1-4."),
 ]
+
+
+if __name__ == "__main__":
+    # the merge order, one name per line (README, step 3)
+    print("\n".join(name for name, _, _ in FEATURES))

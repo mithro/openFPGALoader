@@ -55,13 +55,14 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/tmpdir" ofl-build-trixie \
    `--rp1 rp1prefix` for `rp1pio-cable`). Every line must say OK.
 3. Rebuild `fpgas-online/master` in a detached worktree:
    ```sh
+   F=$(uv run --no-project $S/features.py)   # the merge order, from scripts/features.py
    git checkout --detach upstream/master
-   for f in flash-info netv2-board rp1pio-cable tt-fpga cmake-version-override ice40-spi-sram; do
+   for f in $F; do
      git merge --no-ff --no-edit feature/$f || break   # resolve, git add, git commit --no-edit, continue
    done
    uv run --no-project $S/octopus_commit.py upstream/master "upstream master ($(git rev-parse --short=7 upstream/master))" \
      "Conflicts are resolved by hand (recorded with git rerere)." fpgas-online/master master \
-     feature/flash-info feature/netv2-board feature/rp1pio-cable feature/tt-fpga feature/cmake-version-override feature/ice40-spi-sram
+     $(for f in $F; do echo feature/$f; done)
    ```
    rerere replays earlier resolutions: read every file it resolved (`git diff HEAD` before committing); a replayed
    resolution can be wrong for new context.
@@ -86,4 +87,4 @@ messages unless the code differs), build each patch, merge them into `fpgas-onli
 ## Adding a feature
 
 Branch `feature/<name>` from upstream `master` (one to three patches), add it to `scripts/features.py` (merge
-order and table row), make its backport, then rebuild both integration branches as above.
+order and table row; step 3 reads the list from there), make its backport, then rebuild both integration branches as above.
