@@ -9,10 +9,10 @@ FEATURES = [
      "NeTV2 (Artix-7 35T / 100T) on a Raspberry Pi header; the GPIO cable is chosen at run time "
      "(`rp1pio` on a Pi 5, else `libgpiod`)."),
     ("rp1pio-cable", "cable `rp1pio`",
-     "JTAG through the Raspberry Pi 5 RP1 PIO block (librp1jtag), (a 3.8 MB Artix-7 bitstream in about 6.5 s, against 40 s with libgpiod). "
+     "JTAG through the Raspberry Pi 5 RP1 PIO block (librp1jtag); rp1-jtag's own benchmark: a 3.8 MB Artix-7 bitstream in about 6.5 s, against 40 s with libgpiod. "
      "CMake option `ENABLE_RP1_PIO`."),
     ("tt-fpga", "board `tt_fpga`, cable `tt_micropython`",
-     "TinyTapeout FPGA Demo Board (TTDBv3): iCE40UP5K SRAM load through the RP2040/RP2350's MicroPython raw REPL; "
+     "TinyTapeout FPGA Demo Board (TTDBv3): iCE40UP5K SRAM load through the RP2350B's MicroPython raw REPL; "
      "the project clock on GPIO16 at 50 MHz. CMake option `ENABLE_TT_MICROPYTHON`."),
     ("cmake-version-override", "CMake `OPENFPGALOADER_VERSION`",
      "Lets a packager set the version string `--Version` reports."),
