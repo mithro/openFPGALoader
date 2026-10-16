@@ -73,6 +73,71 @@ Bin file load:
 
 Since it's a direct access to the flash (SPI) the ``-b`` option is required.
 
+SRAM load over host GPIO lines (libgpiod)
+-----------------------------------------
+
+An iCE40 whose SPI configuration port is wired to a Linux host's GPIO lines
+(a Raspberry Pi header) is loaded as an SPI slave (TN-02001 section 13,
+Appendix A) by bit-banging the lines through libgpiod. This is an SRAM load
+only, and nothing is written to the flash sharing the bus: with the iCE40
+held in reset the flash is woken (``0xAB``), its status read until it is not
+busy (``0x05``) and put in Deep Power-down (``0xB9``), and its /HOLD is held
+low, so that it ignores the load. Those three are the only flash commands the
+cable can send; ``-f``, ``--verify`` and the flash options are refused. The
+flash is not woken after the load (the SPI pins are then the design's I/O):
+an iCE40 booting from it sends ``0xAB`` itself (TN-02001 9.4), and a loaded
+design that reads it must do the same. The board
+definition gives the GPIO numbers; ``-d /dev/gpiochipN`` picks the chip,
+otherwise the one labelled ``pinctrl-rp1`` (Pi 5), ``pinctrl-bcm2711`` (Pi 4)
+or ``pinctrl-bcm2835`` (Pi 1-3) is used.
+
+The Fomu EVT on a Raspberry Pi header (BCM GPIO numbers):
+
+============= ===================== ===================================
+   Pi GPIO     Fomu EVT              load
+============= ===================== ===================================
+27            CRESET_B              held low, then let go
+17            CDONE                 read
+8             SPI_SS, flash /CS     driven
+11            SPI_SCK, flash CLK    driven
+9             SPI_SI, flash DO      driven (the Pi's MISO pin)
+10            SPI_SO, flash DI      flash commands in reset, then input
+25            flash /HOLD (SPI_IO3) high for those, low for the load
+============= ===================== ===================================
+
+.. code-block:: bash
+
+    openFPGALoader -b fomu_evt_header design.bin
+
+``--pins MOSI:MISO:SCK:CS[:HOLDN]`` overrides the SPI lines, ``MOSI`` being
+the host's output into the iCE40's SPI_SI (``9:10:11:8:25`` for the Fomu EVT).
+
+.. WARNING::
+  This load has not been tried on hardware. The iCE40 needs a slave
+  configuration clock of 1 to 25 MHz (DS-02008 Table 4.24), and libgpiod,
+  one or two system calls per clock edge, may not reach 1 MHz: on a Pi 3
+  (libgpiod 1.x) it very likely does not. Then the load stops with the
+  measured rate, and the iCE40 boots its flash again. Nothing here says the
+  load succeeds on any Pi.
+
+The load needs a configured iCE40 to start from (CDONE high: it proves, by
+CDONE falling under CRESET_B, that an iCE40 is held on that reset before any
+bus line is driven), and checks CDONE high after the image. The SPI_SCK rate
+is measured for every 4 KiB of the image and over the whole image; outside
+1 to 25 MHz the load stops (a stall stops it too: Table A.1 asks for a
+continuous clock). ``--freq`` and ``--offset`` are refused: the rate cannot
+be set, only measured. After a failure the lines are released and the iCE40
+is reset to boot from its flash again.
+
+SIGINT, SIGTERM and SIGHUP stop the load at the next bit and take the same
+path: the lines released, the iCE40 reset to boot from its flash, CDONE
+checked, a non-zero exit. SIGKILL cannot be caught: a load killed with it
+leaves the iCE40 unconfigured (CDONE low), and every later load and the
+Fomu's header check refuse to start until the board is power-cycled. A
+caller that needs a time limit must send SIGTERM and give the recovery time
+before any SIGKILL, for example ``timeout -k 30 120 openFPGALoader ...``
+(never ``timeout -s KILL``).
+
 ECP5/ECP3/Certus-NX/CertusPro-NX/Crosslink-NX
 =============================================
 

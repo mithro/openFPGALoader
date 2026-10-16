@@ -472,6 +472,13 @@
   Flash: OK
   Constraints: Fomu-PVT
 
+- ID: fomu_evt_header
+  Description: Fomu EVT on a Raspberry Pi header (SPI slave SRAM load over GPIO, libgpiod; untested on hardware, may be too slow)
+  URL: https://github.com/im-tomu/fomu-hardware/tree/evt
+  FPGA: iCE40UltraPlus UP5K
+  Memory: NT
+  Flash: NA
+
 - ID: gr740-mini
   Description: GR740-MINI
   URL: https://gaisler.com/index.php/products/boards/gr740-mini
