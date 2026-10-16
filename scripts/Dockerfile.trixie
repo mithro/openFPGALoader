@@ -1,0 +1,2 @@
+FROM debian:trixie
+RUN apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends build-essential cmake pkg-config git ca-certificates libftdi1-dev libusb-1.0-0-dev libhidapi-dev libudev-dev libgpiod-dev zlib1g-dev
