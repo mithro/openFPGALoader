@@ -73,13 +73,14 @@ Bin file load:
 
 Since it's a direct access to the flash (SPI) the ``-b`` option is required.
 
-SRAM load over host GPIO lines (libgpiod)
------------------------------------------
+SRAM load over host GPIO lines (/dev/gpiomem, libgpiod)
+--------------------------------------------------------
 
 An iCE40 whose SPI configuration port is wired to a Linux host's GPIO lines
 (a Raspberry Pi header) is loaded as an SPI slave (TN-02001 section 13,
-Appendix A) by bit-banging the lines through libgpiod. This is an SRAM load
-only, and nothing is written to the flash sharing the bus: with the iCE40
+Appendix A) by bit-banging the lines: through the Pi's GPIO registers
+(``/dev/gpiomem``) on a Raspberry Pi 1 to 4, through libgpiod elsewhere (see
+below). This is an SRAM load only, and nothing is written to the flash sharing the bus: with the iCE40
 held in reset the flash is woken (``0xAB``), its status read until it is not
 busy (``0x05``) and put in Deep Power-down (``0xB9``), and its /HOLD is held
 low, so that it ignores the load. Those three are the only flash commands the
@@ -87,9 +88,31 @@ cable can send; ``-f``, ``--verify`` and the flash options are refused. The
 flash is not woken after the load (the SPI pins are then the design's I/O):
 an iCE40 booting from it sends ``0xAB`` itself (TN-02001 9.4), and a loaded
 design that reads it must do the same. The board
-definition gives the GPIO numbers; ``-d /dev/gpiochipN`` picks the chip,
-otherwise the one labelled ``pinctrl-rp1`` (Pi 5), ``pinctrl-bcm2711`` (Pi 4)
-or ``pinctrl-bcm2835`` (Pi 1-3) is used.
+definition gives the GPIO numbers.
+
+The backend is chosen by the host, and logged with the reason (``iCE40 SPI
+load through /dev/gpiomem registers: ...``):
+
+* ``/dev/gpiomem`` when ``/proc/device-tree/compatible`` names
+  ``brcm,bcm2835``, ``brcm,bcm2836``, ``brcm,bcm2837`` or ``brcm,bcm2711``
+  (Raspberry Pi 1 to 4, Zero, Zero 2). One 4 KiB page is mapped read/write and
+  the GPIO registers are written directly: GPFSELn at 0x00-0x14 (3 bits per
+  pin, 000 input, 001 output), GPSET0 at 0x1C, GPCLR0 at 0x28, GPLEV0 at 0x34
+  (BCM2835 ARM Peripherals section 6.1, BCM2711 ARM Peripherals section 5.2),
+  GPIO 0-31 only; the pull registers are never touched. The kernel does not
+  know of these accesses, so a pin in an alternate function (SPI0's GPIO8-11,
+  say) is refused instead of taken over. Each pin's function is saved before
+  it is first changed and put back, and read back, on every way out of the
+  load, a failure or a signal included. The loop pads every SPI_SCK period to
+  50 ns or more (it measures its own speed before every write), so the clock
+  stays under 20 MHz whatever the CPU runs at; the 1 to 25 MHz check below
+  remains the authority. If ``/dev/gpiomem`` is absent or cannot be opened
+  read/write on such a host the load stops and says why (and asks "is the user
+  in the gpio group?"); it does not fall back to libgpiod.
+* libgpiod on any other host (a Pi 5, whose RP1 has no such registers, for
+  one), and whenever ``-d /dev/gpiochipN`` names a chip; without ``-d`` the
+  chip is the one labelled ``pinctrl-rp1`` (Pi 5), ``pinctrl-bcm2711`` (Pi 4)
+  or ``pinctrl-bcm2835`` (Pi 1-3).
 
 The Fomu EVT on a Raspberry Pi header (BCM GPIO numbers):
 
@@ -113,19 +136,21 @@ The Fomu EVT on a Raspberry Pi header (BCM GPIO numbers):
 the host's output into the iCE40's SPI_SI (``9:10:11:8:25`` for the Fomu EVT).
 
 .. WARNING::
-  This load has not been tried on hardware. The iCE40 needs a slave
-  configuration clock of 1 to 25 MHz (DS-02008 Table 4.24), and libgpiod,
-  one or two system calls per clock edge, may not reach 1 MHz: on a Pi 3
-  (libgpiod 1.x) it very likely does not. Then the load stops with the
-  measured rate, and the iCE40 boots its flash again. Nothing here says the
+  The iCE40 needs a slave configuration clock of 1 to 25 MHz (DS-02008
+  Table 4.24). On a Pi 3 Model B+ libgpiod (one or two system calls per clock
+  edge) was measured at 0.440 MHz, under the minimum, and the load stopped
+  with that rate: libgpiod cannot do this load on that host, which is why
+  ``/dev/gpiomem`` is used there. The ``/dev/gpiomem`` path has not been tried
+  on hardware. If a load's clock falls outside 1 to 25 MHz the load stops with
+  the measured rate, and the iCE40 boots its flash again. Nothing here says the
   load succeeds on any Pi.
 
 The load needs a configured iCE40 to start from (CDONE high: it proves, by
 CDONE falling under CRESET_B, that an iCE40 is held on that reset before any
 bus line is driven), and checks CDONE high after the image. The SPI_SCK rate
 is measured for every 4 KiB of the image and over the whole image; outside
-1 to 25 MHz the load stops (a stall stops it too: Table A.1 asks for a
-continuous clock). ``--freq`` and ``--offset`` are refused: the rate cannot
+1 to 25 MHz the load stops (a stall that pulls the rate of one 4 KiB chunk
+under 1 MHz stops it too: Table A.1 asks for a continuous clock). ``--freq`` and ``--offset`` are refused: the rate cannot
 be set, only measured. After a failure the lines are released and the iCE40
 is reset to boot from its flash again.
 
