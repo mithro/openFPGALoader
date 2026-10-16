@@ -8,6 +8,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "flashInterface.hpp"
 #include "spiFlashdb.hpp"
@@ -130,6 +131,61 @@ class SPIFlash {
 		void display_status_reg(uint8_t reg);
 		void display_status_reg() {display_status_reg(read_status_reg());}
 		virtual void read_id();
+		/*!
+		 * \brief display complete flash information: manufacturer,
+		 *        part, size, unique ID and SFDP content (read modes, ...)
+		 * \throw std::runtime_error when the JEDEC ID is not a valid
+		 *        (JEP106 parity) or stable one: nothing is displayed
+		 */
+		void display_info();
+		/*!
+		 * \brief read SFDP (JESD216) area
+		 * \param[in] addr: SFDP address
+		 * \param[out] data: buffer
+		 * \param[in] len: length (in Byte)
+		 * \return false when read fails
+		 */
+		bool read_sfdp(uint32_t addr, uint8_t *data, uint32_t len);
+		/* unique ID read result */
+		typedef enum {
+			UID_NONE  = 0, /**< no known unique ID command for this part */
+			UID_BLANK = 1, /**< read, but all 0x00 or all 0xFF */
+			UID_READ  = 2, /**< read */
+		} uid_state_t;
+		/*!
+		 * \brief read factory programmed unique ID (vendor specific)
+		 * \param[out] uid: unique ID (as read, also when blank)
+		 * \param[out] opcode: command used to read uid (0 when UID_NONE)
+		 * \param[out] note: why there is no unique ID, when known
+		 *             (ie Macronix part without factory ESN), or empty
+		 * \return UID_NONE, UID_BLANK or UID_READ
+		 * \throw std::runtime_error when the read itself fails
+		 */
+		uid_state_t read_unique_id(std::vector<uint8_t> &uid, uint8_t &opcode,
+				std::string &note);
+		/*!
+		 * \brief read the RDID (0x9F) bytes following the 3-byte JEDEC ID,
+		 *        for the families that define them: Micron N25Q/MT25Q
+		 *        (extended device ID) and Spansion/Cypress/Infineon
+		 *        (ID-CFI length, sector architecture, family)
+		 * \param[out] ext: RDID bytes 4-6 (empty when not defined)
+		 * \param[out] desc: their meaning, for display
+		 * \return false when the part defines no extended ID
+		 * \throw std::runtime_error when the read fails or the JEDEC ID
+		 *        read with it is not the same
+		 */
+		bool read_extended_id(std::vector<uint8_t> &ext, std::string &desc);
+		/*!
+		 * \brief JSON records (one per flash) built by display_info()
+		 *        since the start of the program
+		 */
+		static const std::vector<std::string> &info_json_records() {
+			return _info_json_records;
+		}
+		/*!
+		 * \brief return manufacturer name based on JEDEC manufacturer ID
+		 */
+		static std::string manufacturer_name(uint8_t mfr_id);
 		uint16_t readNonVolatileCfgReg();
 		uint16_t readVolatileCfgReg();
 		bool set_quad_bit(bool set_quad);
@@ -156,6 +212,8 @@ class SPIFlash {
 
 	private:
 		bool prepare_flash(const int base_addr, const int len);
+		uid_state_t read_macronix_esn(std::vector<uint8_t> &uid,
+				uint8_t &opcode, std::string &note);
 
 	public:
 		/*!
@@ -180,6 +238,7 @@ class SPIFlash {
 		bool _unprotect; /**< allows to unprotect memory before write */
 		bool _must_relock;
 		uint8_t _status;
+		static std::vector<std::string> _info_json_records;
 };
 
 #endif  // SRC_SPIFLASH_HPP_
