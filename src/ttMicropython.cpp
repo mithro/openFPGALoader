@@ -645,68 +645,74 @@ void TTMicropython::program_sram()
 	}
 
 	/* Always finalize: dummy clocks, release SS */
-	finalizeSramProgramming();
+	bool finalized = finalizeSramProgramming();
 
 	if (!sram_ok)
 		throw std::runtime_error(sram_err);
+	if (!finalized)
+		throw std::runtime_error("SRAM finalize failed: the trailing clocks "
+		                         "or the SS release did not complete");
 
-	/* Post-programming: restore board to a usable state.
-	 * - Release SPI pins (set to input)
-	 * - Start clock on GPIO0 (rp_projclk) for the FPGA design
-	 * - Ensure reset is released (high)
-	 * - Set all TT interface pins to input (SAFE-like, no contention)
+	/* Post-programming: leave the board as a TTDBv3 design needs it.
+	 * - The project clock on GPIO16 at 50 MHz: the TTDBv3's rp_projclk.
+	 *   GPIO0 is the TT04 map's (the firmware loads GPIOMapTT04 on every
+	 *   board, see setupSramProgramming()), and the fpgas.online designs
+	 *   take 50 MHz on clk_rp2040 (tt_fpga_platform.py).
+	 * - CRESET (GPIO1) released with a pull-up.
+	 * - The SPI programming pins (sck 6, mosi 3, ss 5) and the TT
+	 *   interface pins (ui_in, uo_out, uio: GPIO17-40 on the RP2350B) to
+	 *   high-impedance inputs, so nothing contends with the design or the
+	 *   PMOD HAT. The management pins are left as the SDK set them.
+	 * Any step that fails is an error: the board is not as asked.
 	 */
 	if (_verbose > 0)
 		printInfo("Configuring post-programming board state...");
 
 	ReplResult post = execRaw(R"(
-from machine import Pin, PWM, mem32
+from machine import Pin, PWM, mem32, freq
 import time
 
-# RP2350 PADS_BANK0 base — used to disable pull-ups/pull-downs
-# for true high-impedance on I/O pins.
+# RP2350 PADS_BANK0: clear the pull-up (bit 3) and pull-down (bit 2) for a
+# true high-impedance input.
 PADS_BANK0 = 0x40038000
 
 def set_hiz(gpio):
-    """Set a GPIO to high-impedance input with no pulls."""
     Pin(gpio, Pin.IN)
-    # Clear PUE (bit 3) and PDE (bit 2) in pad register
     addr = PADS_BANK0 + 0x04 + gpio * 4
     mem32[addr] = mem32[addr] & ~(0x0C)
 
-# Start clock on GPIO0 (rp_projclk) at 10MHz
-# The FPGA design needs a clock to operate
-try:
-    _clk = PWM(Pin(0))
-    _clk.freq(10_000_000)
-    _clk.duty_u16(32768)
-except Exception:
-    Pin(0, Pin.OUT, value=1)
+# The project clock: GPIO16, 50 MHz, from a 150 MHz system clock. The PWM is
+# made twice: the first setup of an RP2350 PWM slice may not take.
+freq(150_000_000)
+clk = PWM(Pin(16))
+clk.freq(50_000_000)
+clk.duty_u16(32768)
+clk.deinit()
+time.sleep_ms(1)
+clk = PWM(Pin(16))
+clk.freq(50_000_000)
+clk.duty_u16(32768)
+if clk.freq() != 50_000_000:
+    raise ValueError("the project clock on GPIO16 is %d Hz, not 50000000" % clk.freq())
+print("CLK_OK", clk.freq())
 
-# Release CRESET (GPIO1): drive high briefly, then switch to
-# input with pull-up so the FPGA stays out of reset without
-# the RP2350 actively driving the line.
 Pin(1, Pin.OUT, value=1)
 time.sleep_ms(1)
-p1 = Pin(1, Pin.IN, Pin.PULL_UP)
+Pin(1, Pin.IN, Pin.PULL_UP)
 
-# Set all other TT interface pins to high-impedance input
-# (no pull-up, no pull-down) so the RP2350 doesn't interfere
-# with FPGA outputs or external connections (PMOD HAT).
-for gpio in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
-             17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28):
-    try:
-        set_hiz(gpio)
-    except Exception:
-        pass
-
+for gpio in [3, 5, 6] + list(range(17, 41)):
+    set_hiz(gpio)
 print("POST_OK")
 )", 5000);
 	if (!post.ok || post.out.find("POST_OK") == std::string::npos) {
-		printWarn("Post-programming board setup may have failed");
-		if (!post.err.empty())
-			printWarn("Error: " + post.err);
+		exitRawRepl();
+		closeSerial();
+		throw std::runtime_error("post-programming board setup failed (clock on GPIO16, "
+		                         "CRESET release, pins to high-impedance): " +
+		                         (post.err.empty() ? post.out : post.err));
 	}
+	if (_verbose > 0)
+		printInfo("Post-programming: " + post.out);
 
 	exitRawRepl();
 	closeSerial();
