@@ -13,18 +13,46 @@
 #include "ice40GpioSpi.hpp"
 
 /*!
+ * \brief the CPU clock, in kHz, as cpufreq reports it
+ */
+struct CpuFreq {
+	double cur_khz;
+	double min_khz;
+	double max_khz;
+};
+
+/*!
  * \file gpiomemIce40Spi.hpp
  * \class Ice40GpioRegs
- * \brief the Raspberry Pi GPIO register page, as the iCE40 load sees it:
- *        32-bit reads and writes at a byte offset into the GPIO block.
- *        Real hardware is GpiomemRegs; a test gives a model of the
- *        registers (and of what is wired to them).
+ * \brief what the iCE40 load needs from a Raspberry Pi: the GPIO register
+ *        page (32-bit reads and writes at a byte offset into the GPIO
+ *        block), a clock, a way to burn time, and the CPU frequency. The
+ *        defaults are the real ones (steady_clock, a counted loop, cpufreq
+ *        in sysfs); real registers are GpiomemRegs. A test overrides all of
+ *        them to keep a virtual clock: every register access and every
+ *        spin advances it, and the SPI_SCK edges can then be timed exactly.
  */
 class Ice40GpioRegs {
 	public:
 		virtual ~Ice40GpioRegs() {}
 		virtual uint32_t read(uint32_t offset) = 0;
 		virtual void write(uint32_t offset, uint32_t value) = 0;
+
+		/*! \brief a monotonic time in ns */
+		virtual double now_ns();
+		/*! \brief burn n loop iterations (each a CPU-bound spin) */
+		virtual void spin(uint32_t n);
+		/*! \brief the CPU clock now, and its limits. Throws, saying which
+		 *         file, when cpufreq cannot be read: nothing is guessed. */
+		virtual CpuFreq cpu_freq();
+
+		/*!
+		 * \brief cpufreq in `dir` (default: cpu0's policy): scaling_cur_freq,
+		 *        cpuinfo_min_freq, cpuinfo_max_freq, in kHz; throws if one
+		 *        cannot be read or is not a positive number
+		 */
+		static CpuFreq read_cpufreq(const std::string &dir =
+			"/sys/devices/system/cpu/cpu0/cpufreq");
 };
 
 /*!
@@ -72,39 +100,74 @@ class GpiomemRegs : public Ice40GpioRegs {
  * GPLEV0 0x34. Only GPIO 0-31 (the "0" registers); the pull registers are
  * never touched.
  *
- * The kernel does not know of these accesses: nothing stops another driver
- * or process using the same pins. A pin whose function is an alternate one
- * (a driver's, SPI0 for instance) is refused rather than taken over.
+ * What the kernel does not do here. /dev/gpiomem bypasses the kernel's
+ * pin ownership and cleanup:
+ *  - Nothing stops another driver or process using the same pins. A pin
+ *    whose function is an alternate one (SPI0's GPIO8-11, say) is refused,
+ *    and so is any of the seven lines already an output at the start (a
+ *    killed earlier load left it so): the message names them and gives the
+ *    commands that put them back to inputs.
+ *  - A GPFSEL register holds 10 pins (GPFSEL0 GPIO0-9, GPFSEL1 GPIO10-19,
+ *    GPFSEL2 GPIO20-29). Changing one pin's function is a read-modify-write
+ *    of its register, and another writer (a driver, another process)
+ *    changing a different pin of the same register between our read and
+ *    our write has its change lost. The window is tens of nanoseconds; it
+ *    is not closed.
+ *  - When the process dies without unwinding, the pins stay driven (CRESET_B
+ *    low, the SPI lines out) until a later run, or pinctrl, puts them back.
+ *    Handled and put back: errors, SIGINT, SIGTERM, SIGHUP, SIGQUIT and
+ *    SIGPIPE (they unwind to the destructor). Not handled: SIGKILL,
+ *    SIGSEGV, SIGBUS, SIGABRT, abort(), std::terminate(), exit() and
+ *    _exit() called from elsewhere.
  *
- * Each pin's function (its GPFSEL bits) is saved before the pin is first
- * changed and put back by restore_functions(), which the destructor runs
- * on every way out of a load, errors and the SIGINT/SIGTERM/SIGHUP stop
- * included (they unwind to the destructor, see Ice40::program_cram_slave).
+ * Each pin's function (its GPFSEL bits) is saved when the load starts and
+ * put back, and read back, by restore_functions(), which the destructor
+ * runs. restore_functions() uses plain register accesses on a fixed array
+ * (no allocation, no libc call but sigprocmask) and blocks the handled
+ * signals around each read-modify-write, so it may be called from a signal
+ * handler without that handler landing between another read and write.
  *
- * The image is clocked by write() and clocks(), whose loop is timed and
- * padded, before every call, to a period not under 1/20 MHz: the
- * data sheet's 25 MHz maximum is never approached, whatever the CPU runs
- * at; Ice40's per-chunk and overall rate checks remain the authority.
+ * The SPI_SCK rate. The image is clocked by write() and clocks(), whose
+ * loop is padded so that every SCK phase is at least 25 ns, every period at
+ * least 50 ns (so at or under 20 MHz), against the data sheet's 20 ns
+ * minimum SCK high and low time and 25 MHz maximum (DS-02008 Table 4.24
+ * tCCLKH, tCCLKL, fMAX). The padding is calibrated once, in take_bus(), with
+ * zero-mask writes (no pin moves), at the CPU clock cpufreq reports, and
+ * scaled to the CPU's maximum clock: every cost measured is taken to be
+ * CPU-bound, so at the maximum clock it is shorter by cur/max and the pad
+ * is sized for that. The load also checks, from the same numbers scaled to
+ * the minimum clock, that a bit takes 1000 ns or less there (1 MHz stays
+ * reachable at the slowest clock); if not it stops. If cpufreq cannot be
+ * read, the load stops: nothing is guessed.
+ *
+ * The assumption this rests on, and that no code here can check: register
+ * writes are posted and reach the pins no sooner than the CPU issues them,
+ * so spacing the CPU's writes spaces the pin edges at least as far apart
+ * (the bus can delay a write, not hasten it). Whether the real pin edges
+ * meet the 20 ns phases is measured by the hardware trial, not guaranteed
+ * by this code. Ice40's per-chunk and overall rate checks stay the
+ * authority on the mean, and see only the loop's time, not calibration.
  */
 class GpiomemIce40Spi : public Ice40GpioSpi {
 	public:
 		/*!
 		 * \param[in] regs: the GPIO registers (takes them over)
-		 * \throws when a line is not GPIO 0-31, or its function is an
-		 *         alternate one
+		 * \throws when a line is not GPIO 0-31, its function is an
+		 *         alternate one, or it is an output already
 		 */
 		GpiomemIce40Spi(const ice40_gpio_pins_t &pins,
 			std::unique_ptr<Ice40GpioRegs> regs, int8_t verbose);
 		~GpiomemIce40Spi();
 
+		void take_bus() override;
 		void write(const uint8_t *data, uint32_t len) override;
 		void clocks(uint32_t nclk) override;
 
 		/*!
 		 * \brief every pin changed so far back to the function it had
 		 *        when the load started, and read back. Plain register
-		 *        accesses only: no allocation, no exception, no libc call,
-		 *        so it is async-signal-safe.
+		 *        accesses only: no allocation, no exception, no libc call
+		 *        but sigprocmask.
 		 * \return how many pins did not read back as saved
 		 */
 		int restore_functions() noexcept;
@@ -113,9 +176,10 @@ class GpiomemIce40Spi : public Ice40GpioSpi {
 		uint32_t pad_spins() const { return _pad_spins; }
 		/*!
 		 * \brief the padding for a host whose three register writes of a
-		 *        bit take bit_ns together and whose spin takes spin_ns:
-		 *        SPI_SCK high w + pad >= 25 ns, low 2w + pad >= 25 ns,
-		 *        period 3w + 2 pad >= 50 ns (w = bit_ns / 3)
+		 *        bit take bit_ns together and whose spin takes spin_ns, both
+		 *        as at the CPU's maximum clock: the SCK high phase w + pad
+		 *        is at least 25 ns (w = bit_ns / 3); the low phase 2w + pad
+		 *        and the period 3w + 2 pad = 50 ns + w then follow
 		 */
 		static uint32_t pad_spins_for(double bit_ns, double spin_ns);
 
@@ -128,9 +192,12 @@ class GpiomemIce40Spi : public Ice40GpioSpi {
 		 * \brief gpiomem if the host is a BCM2835, BCM2836, BCM2837 or
 		 *        BCM2711 (named in `compatible`, the device tree's
 		 *        NUL-separated list), else libgpiod; libgpiod too when the
-		 *        user named a gpiochip.
+		 *        user named a gpiochip, or when `compatible` does not exist
+		 *        (not a device-tree host).
 		 * \param[in] chip_given: -d was given
 		 * \param[in] compatible: /proc/device-tree/compatible
+		 * \throws when `compatible` exists and cannot be read: the host
+		 *         cannot be told, and nothing is guessed
 		 */
 		static Choice select(bool chip_given,
 			const std::string &compatible = "/proc/device-tree/compatible");
@@ -151,7 +218,6 @@ class GpiomemIce40Spi : public Ice40GpioSpi {
 
 		void fsel(unsigned int offset, uint32_t function);
 		void mark_changed(unsigned int offset);
-		void bits(const uint8_t *data, uint32_t len);
 		void calibrate();
 
 		std::unique_ptr<Ice40GpioRegs> _regs;
@@ -166,6 +232,7 @@ class GpiomemIce40Spi : public Ice40GpioSpi {
 		Saved _saved[8];
 		unsigned int _n_saved;
 		uint32_t _pad_spins;
+		bool _calibrated;
 };
 
 #endif  // SRC_GPIOMEMICE40SPI_HPP_
