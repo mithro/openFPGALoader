@@ -12,25 +12,7 @@
 
 #include <gpiod.h>
 
-#include "ice40SpiSlaveInterface.hpp"
-
-/*!
- * \brief the GPIO lines (offsets on one gpiochip) of an iCE40 wired as an
- *        SPI slave to a Linux host. The host's output into the iCE40's
- *        SPI_SI is `si`; `so` is the iCE40's SPI_SO. `flash`: an SPI
- *        flash shares the bus (SPI_SS is its /CS, `si` its DO, `so` its DI);
- *        `holdn` is its /HOLD, -1 when not wired.
- */
-typedef struct {
-	int si;
-	int so;
-	int sck;
-	int ss;
-	int holdn;
-	int creset;
-	int cdone;
-	bool flash;
-} ice40_gpio_pins_t;
+#include "ice40GpioSpi.hpp"
 
 /*!
  * \file libgpiodIce40Spi.hpp
@@ -52,7 +34,7 @@ typedef struct {
  * (TN-02001 9.4). Only 0xAB, 0x05 (read status) and 0xB9 can be sent: no
  * command that writes the flash.
  */
-class LibgpiodIce40Spi : public Ice40SpiSlaveInterface {
+class LibgpiodIce40Spi : public Ice40GpioSpi {
 	public:
 		/*!
 		 * \param[in] dev: /dev/gpiochipN; empty: the Raspberry Pi header's
@@ -62,13 +44,8 @@ class LibgpiodIce40Spi : public Ice40SpiSlaveInterface {
 			const std::string &dev, int8_t verbose);
 		~LibgpiodIce40Spi();
 
-		void hold_reset(bool hold) override;
-		bool cdone() override;
-		void take_bus() override;
 		void release_bus() override;
-		void set_ss(bool high) override;
 		void write(const uint8_t *data, uint32_t len) override;
-		void clocks(uint32_t nclk) override;
 
 		/*!
 		 * \brief the gpiochip of a Raspberry Pi's 40-pin header: the one
@@ -79,28 +56,14 @@ class LibgpiodIce40Spi : public Ice40SpiSlaveInterface {
 		static std::string header_chip();
 
 	private:
-		void output(unsigned int offset, bool level);
-		void input(unsigned int offset);
-		void set(unsigned int offset, bool level);
-		bool get(unsigned int offset);
-		/* each of offsets an input, all tried: what failed, in words */
-		std::vector<std::string> release(
-			const std::vector<unsigned int> &offsets);
+		void output(unsigned int offset, bool level) override;
+		void input(unsigned int offset) override;
+		void set(unsigned int offset, bool level) override;
+		bool get(unsigned int offset) override;
 		void close_lines();
-		uint8_t flash_command(uint8_t opcode, bool read);
-		void flash_power_down();
 #ifdef GPIOD_APIV2
 		void reconfigure();
 #endif
-
-		ice40_gpio_pins_t _pins;
-		bool _verbose;
-		/* request order, also the v1 release order: CRESET_B last */
-		std::vector<unsigned int> _lines;
-		/* bus lines take_bus() drives, in release order */
-		std::vector<unsigned int> _bus;
-		/* the lines driven now, and their level */
-		std::map<unsigned int, bool> _outputs;
 
 		gpiod_chip *_chip;
 #ifdef GPIOD_APIV2
