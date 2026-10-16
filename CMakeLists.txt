@@ -409,7 +409,7 @@ if (${USE_LIBFTDI})
 	# ICE40 Driver.
 	if (ENABLE_ICE40_SUPPORT)
 		list(APPEND OPENFPGALOADER_SOURCE  src/ice40.cpp)
-		list(APPEND OPENFPGALOADER_HEADERS src/ice40.hpp)
+		list(APPEND OPENFPGALOADER_HEADERS src/ice40.hpp src/ice40SpiSlaveInterface.hpp)
 		add_definitions(-DENABLE_ICE40_SUPPORT=1)
 		message("ICE40 support enabled")
 	else()
