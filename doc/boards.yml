@@ -395,7 +395,7 @@
   Constraints: Fomu-PVT
 
 - ID: fomu_evt_header
-  Description: Fomu EVT on a Raspberry Pi header (SPI slave SRAM load over GPIO, libgpiod; untested on hardware, may be too slow)
+  Description: Fomu EVT on a Raspberry Pi header (SPI slave SRAM load over GPIO: the GPIO registers through /dev/gpiomem on a Pi 1-4, libgpiod elsewhere; untested on hardware)
   URL: https://github.com/im-tomu/fomu-hardware/tree/evt
   FPGA: iCE40UltraPlus UP5K
   Memory: NT
