@@ -30,6 +30,9 @@
 #ifdef ENABLE_DFU
 #include "dfu.hpp"
 #endif
+#ifdef ENABLE_TT_MICROPYTHON
+#include "ttMicropython.hpp"
+#endif
 #include "display.hpp"
 #ifdef ENABLE_EFINIX_SUPPORT
 #include "efinix.hpp"
@@ -368,6 +371,90 @@ int main(int argc, char **argv)
 		return EXIT_SUCCESS;
 #else
 		printError("DFU support: disabled at build time");
+		return EXIT_FAILURE;
+#endif
+	}
+
+	/* --------------------------------- */
+	/* TinyTapeout MicroPython access   */
+	/* --------------------------------- */
+	if (board && board->mode == COMM_TT_MICROPYTHON) {
+#ifdef ENABLE_TT_MICROPYTHON
+		/* Refuse what this backend cannot do, before opening the port */
+		if (args.detect_flash) {
+			printError("TinyTapeout MicroPython: flash detection is not "
+				"supported (the board has no SPI flash)");
+			return EXIT_FAILURE;
+		}
+		if (args.prg_type == Device::RD_FLASH) {
+			printError("TinyTapeout MicroPython: reading the flash is not "
+				"supported (the board has no SPI flash)");
+			return EXIT_FAILURE;
+		}
+		if (args.prg_type == Device::WR_FLASH) {
+			printError("TinyTapeout MicroPython: writing the flash is not "
+				"supported (the board has no SPI flash); use --write-sram");
+			return EXIT_FAILURE;
+		}
+		if (args.verify) {
+			printError("TinyTapeout MicroPython: --verify is not supported");
+			return EXIT_FAILURE;
+		}
+		if (args.reset) {
+			printError("TinyTapeout MicroPython: --reset is not supported");
+			return EXIT_FAILURE;
+		}
+		if (!args.file_type.empty()) {
+			printError("TinyTapeout MicroPython: --file-type is not "
+				"supported (the file is sent to the FPGA as it is)");
+			return EXIT_FAILURE;
+		}
+		if (args.offset != 0 || args.bulk_erase_flash ||
+				args.unprotect_flash || args.external_flash ||
+				!args.secondary_bit_file.empty()) {
+			printError("TinyTapeout MicroPython: --offset, --bulk-erase, "
+				"--unprotect-flash, --external-flash and "
+				"--secondary-bitstream are not supported");
+			return EXIT_FAILURE;
+		}
+
+		std::string serial_port = args.device;
+		if (serial_port.empty() || serial_port == "-") {
+			serial_port = TTMicropython::detectSerialPort(args.verbose);
+			if (serial_port.empty()) {
+				printError("No TinyTapeout board found");
+				return EXIT_FAILURE;
+			}
+		}
+
+		bool write_flash = (args.prg_type == Device::WR_FLASH);
+
+		try {
+			TTMicropython tt(args.bit_file, args.file_type,
+				serial_port, write_flash, args.verify, args.verbose);
+
+			if (args.detect) {
+				tt.detect();
+				return EXIT_SUCCESS;
+			}
+
+			if (args.bit_file.empty()) {
+				printError("No bitstream file specified");
+				return EXIT_FAILURE;
+			}
+
+			if (write_flash)
+				tt.program_flash();
+			else
+				tt.program_sram();
+		} catch (std::exception &e) {
+			printError("TT MicroPython failed: " + std::string(e.what()));
+			return EXIT_FAILURE;
+		}
+
+		return EXIT_SUCCESS;
+#else
+		printError("TinyTapeout MicroPython support: disabled at build time");
 		return EXIT_FAILURE;
 #endif
 	}

@@ -53,6 +53,7 @@ option(ENABLE_DFU              "enable DFU support (requires libUSB)"         ${
 option(ENABLE_FTDI_BASED_CABLE "enable cables based on FTDI (requires libFTDI" ${ENABLE_CABLE_ALL})
 option(ENABLE_GOWIN_GWU2X      "enable Gowin GWU2X interface"                 ${ENABLE_CABLE_ALL})
 option(ENABLE_SVF_JTAG         "enable SVF support"                           ${ENABLE_CABLE_ALL})
+option(ENABLE_TT_MICROPYTHON   "enable TinyTapeout MicroPython support"       ${ENABLE_CABLE_ALL})
 option(ENABLE_USB_BLASTERI     "enable Altera USB Blaster I support"          ${ENABLE_CABLE_ALL})
 option(ENABLE_USB_BLASTERII    "enable Altera USB Blaster II support"         ${ENABLE_CABLE_ALL})
 
@@ -591,6 +592,12 @@ list (APPEND OPENFPGALOADER_HEADERS src/svf_jtag.hpp)
 add_definitions(-DENABLE_SVF_JTAG)
 endif()
 
+# TinyTapeout MicroPython
+if (ENABLE_TT_MICROPYTHON)
+list(APPEND OPENFPGALOADER_SOURCE  src/ttMicropython.cpp)
+list(APPEND OPENFPGALOADER_HEADERS src/ttMicropython.hpp)
+endif()
+
 # Xilinx Platform Cable USB
 if (ENABLE_XILINX_PLATFORM_CABLE_USB)
 	list(APPEND OPENFPGALOADER_SOURCE  src/xilinxPlatformCableUSB.cpp)
@@ -668,6 +675,11 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 
 	target_sources(openFPGALoader PRIVATE src/pathHelper.cpp)
 	list(APPEND OPENFPGALOADER_HEADERS src/pathHelper.hpp)
+
+	# TT MicroPython auto-detection uses SetupDi
+	if (ENABLE_TT_MICROPYTHON)
+		target_link_libraries(openFPGALoader setupapi)
+	endif()
 endif()
 
 # libusb_attach_kernel_driver is only available on Linux.
@@ -735,6 +747,14 @@ if (ENABLE_DFU)
 	message("DFU support enabled")
 else()
 	message("DFU support disabled")
+endif()
+
+# TinyTapeout MicroPython
+if (ENABLE_TT_MICROPYTHON)
+	add_definitions(-DENABLE_TT_MICROPYTHON=1)
+	message("TinyTapeout MicroPython support enabled")
+else()
+	message("TinyTapeout MicroPython support disabled")
 endif()
 
 # dirtyJtag

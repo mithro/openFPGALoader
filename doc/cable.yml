@@ -324,6 +324,13 @@ tigard:
     URL: https://www.crowdsupply.com/securinghw/tigard
 
 
+tt_micropython:
+
+  - Name: Tiny Tapeout MicroPython
+    Description: iCE40 SRAM configuration through the MicroPython raw REPL of the RP2350B on the Tiny Tapeout FPGA Demo Board (USB serial, no library needed).
+    URL: https://github.com/TinyTapeout/tt-micropython-firmware
+
+
 usb-blaster:
 
   - Name: intel USB Blaster I interface
