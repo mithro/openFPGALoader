@@ -131,7 +131,9 @@ class GpiomemRegs : public Ice40GpioRegs {
  * loop is padded so that every SCK phase is at least 25 ns, every period at
  * least 50 ns (so at or under 20 MHz), against the data sheet's 20 ns
  * minimum SCK high and low time and 25 MHz maximum (DS-02008 Table 4.24
- * tCCLKH, tCCLKL, fMAX). The padding is calibrated once, in take_bus(), with
+ * tCCLKH, tCCLKL, fMAX). The padding is calibrated once, in prepare() (before
+ * any line is read or driven, so a host that cannot load stops with the
+ * Fomu's design running), with
  * zero-mask writes (no pin moves), at the CPU clock cpufreq reports, and
  * scaled to the CPU's maximum clock: every cost measured is taken to be
  * CPU-bound, so at the maximum clock it is shorter by cur/max and the pad
@@ -159,7 +161,7 @@ class GpiomemIce40Spi : public Ice40GpioSpi {
 			std::unique_ptr<Ice40GpioRegs> regs, int8_t verbose);
 		~GpiomemIce40Spi();
 
-		void take_bus() override;
+		void prepare() override;
 		void write(const uint8_t *data, uint32_t len) override;
 		void clocks(uint32_t nclk) override;
 

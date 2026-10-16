@@ -74,6 +74,13 @@ class Ice40SpiSlaveInterface {
 		}
 
 		/*!
+		 * \brief called first by the load, before anything is read or driven:
+		 *        whatever a backend must settle without touching a line
+		 *        (a host that can never load stops here, with the board's
+		 *        running design untouched). Throws if the load cannot go on.
+		 */
+		virtual void prepare() {}
+		/*!
 		 * \brief CRESET_B
 		 * \param[in] hold: true: driven low (the iCE40 in reset, its SPI
 		 *            pins released); false: let go (the board's pull-up

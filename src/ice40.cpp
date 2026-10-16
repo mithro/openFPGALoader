@@ -281,6 +281,12 @@ void Ice40::program_cram_slave(const uint8_t *data, uint32_t length)
 		Ice40SpiSlaveInterface *slave;
 	} abort_flag(_slave);
 
+	/* the backend settles what needs no line (its clock, its limits)
+	 * before anything is read or driven: a host that can never load stops
+	 * here with the running design untouched
+	 */
+	_slave->prepare();
+
 	/* CDONE must be high first: an iCE40 holding a design. If it is
 	 * already low, CDONE low under CRESET_B proves nothing, and the SPI
 	 * lines are not driven.

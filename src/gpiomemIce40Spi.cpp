@@ -60,8 +60,9 @@
 #define GPIO_PINS			32	/* GPSET0, GPCLR0, GPLEV0 */
 #define GPIO_PAGE			4096	/* /dev/gpiomem maps one page */
 
-/* every SPI_SCK phase is held at 25 ns or more, hence every period at 50 ns
- * or more (at or under 20 MHz): the data sheet's SPI_SCK high and low
+/* every SPI_SCK phase is sized for 25 ns or more, hence every period for
+ * 50 ns or more (at or under 20 MHz); the loop's own overhead is counted as
+ * write time, so a real phase may be a few ns shorter than sized: the data sheet's SPI_SCK high and low
  * times are 20 ns or more and its maximum is 25 MHz (DS-02008 Table 4.24
  * tCCLKH, tCCLKL, fMAX). Nothing measures the slew at the pad.
  */
@@ -89,7 +90,11 @@ static double read_khz(const std::string &path)
 	if (!f)
 		throw std::runtime_error("cannot read " + path + ": " +
 			strerror(errno) + ": the CPU clock is unknown, so SPI_SCK "
-			"cannot be held to the iCE40's limits; nothing is driven");
+			"cannot be held to the iCE40's limits; nothing is driven. This "
+			"load sizes its clock padding from cpufreq and has no override: "
+			"is the kernel's cpufreq driver loaded and exposing "
+			"/sys/devices/system/cpu/cpu0/cpufreq? (Whether Pi 1 and Zero "
+			"images provide it is unverified.)");
 	double khz = 0;
 	int n = fscanf(f, "%lf", &khz);
 	fclose(f);
@@ -234,9 +239,17 @@ GpiomemIce40Spi::~GpiomemIce40Spi()
 		stuck.push_back(e.what());
 	}
 	int bad = restore_functions();
-	if (bad)
+	if (bad) {
+		std::string lines;
+		for (int pin : _bus)
+			lines += std::to_string(pin) + ",";
 		stuck.push_back(std::to_string(bad) + " pin(s) did not read back "
-			"as their saved function: they may still be driven");
+			"as their saved function: they may still be driven and CRESET_B "
+			"may be held low. Recover: pinctrl set " + lines +
+			std::to_string(_pins.creset) + " ip (CRESET_B last), then "
+			"pinctrl get " + std::to_string(_pins.cdone) + " must show CDONE "
+			"high; if it stays low, power-cycle the board");
+	}
 	for (const std::string &s : stuck)
 		printError("gpiomem iCE40 SPI: " + s);
 }
@@ -360,11 +373,11 @@ static uint32_t shift_bits(Ice40GpioRegs *regs,
 	return nbits;
 }
 
-void GpiomemIce40Spi::take_bus()
+void GpiomemIce40Spi::prepare()
 {
-	Ice40GpioSpi::take_bus();
-	/* here, with the bus ours and nothing sent yet: Ice40 times the
-	 * image from its first write, so calibration is not in that time
+	/* first of all, before any line is read or driven: Ice40 times the
+	 * image from its first write, so calibration is not in that time, and
+	 * a host that cannot load stops here with the board untouched
 	 */
 	calibrate();
 }
@@ -451,7 +464,7 @@ void GpiomemIce40Spi::write(const uint8_t *data, uint32_t len)
 	if (!_outputs.count(_pins.sck) || !_outputs.count(_pins.si))
 		throw std::runtime_error("SPI_SCK and SPI_SI are not driven");
 	if (!_calibrated)
-		throw std::logic_error("write before take_bus() calibrated the clock");
+		throw std::logic_error("write before prepare() calibrated the clock");
 	uint32_t sent = shift_bits(_regs.get(), abort_flag(), data,
 		len * 8, 1u << _pins.sck, 1u << _pins.si, _pad_spins);
 	/* SPI_SCK is low at every bit boundary; SPI_SI is the last bit sent */
@@ -468,7 +481,7 @@ void GpiomemIce40Spi::write(const uint8_t *data, uint32_t len)
 void GpiomemIce40Spi::clocks(uint32_t nclk)
 {
 	if (!_calibrated)
-		throw std::logic_error("clocks before take_bus() calibrated the clock");
+		throw std::logic_error("clocks before prepare() calibrated the clock");
 	set(_pins.si, true);
 	uint32_t sent = shift_bits(_regs.get(), abort_flag(), NULL, nclk,
 		1u << _pins.sck, 1u << _pins.si, _pad_spins);
