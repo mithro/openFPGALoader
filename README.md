@@ -1,3 +1,21 @@
+<!-- fpgas.online feature table: generated, do not edit by hand -->
+# openFPGALoader with fpgas.online features
+
+This branch is [openFPGALoader](https://github.com/trabucayre/openFPGALoader/tree/master) (upstream `master`) with the features below merged in.
+Each feature is its own branch of one to three patches, kept rebased on upstream `master`
+and written to be suitable for upstream; each also has a backport on the latest release.
+The same features on the latest release, v1.1.1: [`fpgas-online/v1.1.1`](https://github.com/mithro/openFPGALoader/tree/fpgas-online/v1.1.1).
+
+| Feature | Adds | What it does | On upstream `master` | On v1.1.1 |
+|---|---|---|---|---|
+| flash-info | `--flash-info`, `--flash-info-json` | Read-only SPI flash report: JEDEC and extended ID, factory unique ID, JESD216 SFDP (read modes, erase types, 4-byte instructions), as text or a JSON file; a failed flash detection exits non-zero. | [`feature/flash-info`](https://github.com/mithro/openFPGALoader/tree/feature/flash-info) | [`backport/v1.1.1/flash-info`](https://github.com/mithro/openFPGALoader/tree/backport/v1.1.1/flash-info) |
+| netv2-board | boards `netv2`, `netv2_100` | NeTV2 (Artix-7 35T / 100T) on a Raspberry Pi header; the GPIO cable is chosen at run time (`rp1pio` on a Pi 5, else `libgpiod`). | [`feature/netv2-board`](https://github.com/mithro/openFPGALoader/tree/feature/netv2-board) | [`backport/v1.1.1/netv2-board`](https://github.com/mithro/openFPGALoader/tree/backport/v1.1.1/netv2-board) |
+| rp1pio-cable | cable `rp1pio` | JTAG through the Raspberry Pi 5 RP1 PIO block (librp1jtag); rp1-jtag's own benchmark: a 3.8 MB Artix-7 bitstream in about 6.5 s, against 40 s with libgpiod. CMake option `ENABLE_RP1_PIO`. | [`feature/rp1pio-cable`](https://github.com/mithro/openFPGALoader/tree/feature/rp1pio-cable) | [`backport/v1.1.1/rp1pio-cable`](https://github.com/mithro/openFPGALoader/tree/backport/v1.1.1/rp1pio-cable) |
+| tt-fpga | board `tt_fpga`, cable `tt_micropython` | TinyTapeout FPGA Demo Board (TTDBv3): iCE40UP5K SRAM load through the RP2350B's MicroPython raw REPL; the project clock on GPIO16 at 50 MHz. CMake option `ENABLE_TT_MICROPYTHON`. | [`feature/tt-fpga`](https://github.com/mithro/openFPGALoader/tree/feature/tt-fpga) | [`backport/v1.1.1/tt-fpga`](https://github.com/mithro/openFPGALoader/tree/backport/v1.1.1/tt-fpga) |
+| cmake-version-override | CMake `OPENFPGALOADER_VERSION` | Lets a packager set the version string `--Version` reports. | [`feature/cmake-version-override`](https://github.com/mithro/openFPGALoader/tree/feature/cmake-version-override) | [`backport/v1.1.1/cmake-version-override`](https://github.com/mithro/openFPGALoader/tree/backport/v1.1.1/cmake-version-override) |
+| ice40-spi-sram | board `fomu_evt_header` | iCE40 SRAM load over any SPI slave interface (TN-02001), on host GPIO lines through libgpiod, or through /dev/gpiomem registers on a Raspberry Pi 1-4. | [`feature/ice40-spi-sram`](https://github.com/mithro/openFPGALoader/tree/feature/ice40-spi-sram) | [`backport/v1.1.1/ice40-spi-sram`](https://github.com/mithro/openFPGALoader/tree/backport/v1.1.1/ice40-spi-sram) |
+<!-- end of fpgas.online feature table -->
+
 # openFPGALoader
 
 <p align="right">
