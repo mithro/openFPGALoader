@@ -577,6 +577,9 @@ endif()
 if (ENABLE_LIBGPIOD)
 list(APPEND OPENFPGALOADER_SOURCE  src/libgpiodJtagBitbang.cpp)
 list(APPEND OPENFPGALOADER_HEADERS src/libgpiodJtagBitbang.hpp)
+# iCE40 SPI slave (SRAM) load over GPIO lines
+list(APPEND OPENFPGALOADER_SOURCE  src/ice40GpioSpi.cpp src/libgpiodIce40Spi.cpp)
+list(APPEND OPENFPGALOADER_HEADERS src/ice40GpioSpi.hpp src/libgpiodIce40Spi.hpp src/ice40SpiSlaveInterface.hpp)
 endif()
 
 # RemoteBitbang

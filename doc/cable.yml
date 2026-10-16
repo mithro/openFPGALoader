@@ -319,7 +319,7 @@ xvc-server:
 libgpiod:
 
   - Name: Bitbang GPIO
-    Description: Bitbang GPIO pins on Linux host.
+    Description: Bitbang GPIO pins on Linux host. JTAG, and with an iCE40 board wired to GPIO lines (fomu_evt_header) an SPI slave SRAM load.
     URL: https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/
 
 jetson-nano-gpio:
