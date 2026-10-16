@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <map>
 #include <sstream>
 #include <vector>
@@ -47,6 +48,7 @@
 #include "ice40.hpp"
 #endif
 #if defined(ENABLE_ICE40_SUPPORT) && defined(ENABLE_LIBGPIOD)
+#include "gpiomemIce40Spi.hpp"
 #include "libgpiodIce40Spi.hpp"
 #endif
 #ifdef ENABLE_LATTICESSPI_SUPPORT
@@ -1010,8 +1012,23 @@ int gpio_spi_comm(struct arguments args,
 	}
 
 	try {
-		LibgpiodIce40Spi gpio(pins, args.device, args.verbose);
-		Ice40 target(&gpio, args.bit_file, args.file_type, args.verbose);
+		/* the GPIO registers of a BCM283x Raspberry Pi 1-4 through
+		 * /dev/gpiomem (fast enough for the iCE40's 1 MHz minimum clock),
+		 * else libgpiod; never libgpiod when /dev/gpiomem is what that
+		 * host needs and cannot be had
+		 */
+		GpiomemIce40Spi::Choice choice =
+			GpiomemIce40Spi::select(!args.device.empty());
+		printInfo(std::string("iCE40 SPI load through ") +
+			(choice.gpiomem ? "/dev/gpiomem registers" : "libgpiod") +
+			": " + choice.why);
+		std::unique_ptr<Ice40SpiSlaveInterface> gpio;
+		if (choice.gpiomem)
+			gpio.reset(new GpiomemIce40Spi(pins,
+				GpiomemIce40Spi::open_gpiomem(), args.verbose));
+		else
+			gpio.reset(new LibgpiodIce40Spi(pins, args.device, args.verbose));
+		Ice40 target(gpio.get(), args.bit_file, args.file_type, args.verbose);
 		target.program(0, false);
 	} catch (std::exception &e) {
 		printError("Error: iCE40 SRAM load failed: " + std::string(e.what()));

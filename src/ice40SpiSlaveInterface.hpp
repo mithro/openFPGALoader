@@ -63,7 +63,23 @@ class Ice40SpiSlaveInterface {
 				throw Ice40SpiSlaveAborted(*_abort);
 		}
 		bool abort_pending() const { return _abort && *_abort; }
+		/*!
+		 * \brief the flag itself, for a loop too tight to call
+		 *        abort_check(): never NULL, points at a flag that stays 0
+		 *        when none was given
+		 */
+		const volatile sig_atomic_t *abort_flag() const {
+			static const volatile sig_atomic_t none = 0;
+			return _abort ? _abort : &none;
+		}
 
+		/*!
+		 * \brief called first by the load, before any pin is driven or changed:
+		 *        whatever a backend must settle without touching a line
+		 *        (a host that can never load stops here, with the board's
+		 *        running design untouched). Throws if the load cannot go on.
+		 */
+		virtual void prepare() {}
 		/*!
 		 * \brief CRESET_B
 		 * \param[in] hold: true: driven low (the iCE40 in reset, its SPI
