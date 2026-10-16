@@ -30,6 +30,7 @@ enum communication_type {
 	MODE_CH347,            /*! CH347 JTAG mode */
 	MODE_GWU2X,            /*! Gowin GWU2X JTAG mode */
 	MODE_ESP,              /*! esp32c3, esp32s3 */
+	MODE_TT_MICROPYTHON,   /*! TinyTapeout MicroPython raw REPL */
 };
 
 /*!
@@ -137,6 +138,9 @@ static std::map <std::string, cable_t> cable_list = {
 	{"usb-blasterII_1",    CABLE_DEF(MODE_USBBLASTER, 0x09Fb, 0x6010                   )},
 	{"usb-blasterIII",     FTDI_SER(0x09fb, 0x6022, FTDI_INTF_A, 0x08, 0x3B, 0x00, 0x00)},
 	{"xvc-client",         CABLE_DEF(MODE_XVC_CLIENT, 0x0000, 0x0000                   )},
+#ifdef ENABLE_TT_MICROPYTHON
+	{"tt_micropython",     CABLE_DEF(MODE_TT_MICROPYTHON, 0x2E8A, 0x0005               )},
+#endif
 #ifdef ENABLE_LIBGPIOD
 	{"libgpiod",           CABLE_DEF(MODE_LIBGPIOD_BITBANG, 0, 0x0000                  )},
 #endif

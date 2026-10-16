@@ -51,6 +51,7 @@ option(ENABLE_DFU              "enable DFU support (requires libUSB)"         ${
 option(ENABLE_FTDI_BASED_CABLE "enable cables based on FTDI (requires libFTDI" ${ENABLE_CABLE_ALL})
 option(ENABLE_GOWIN_GWU2X      "enable Gowin GWU2X interface"                 ${ENABLE_CABLE_ALL})
 option(ENABLE_SVF_JTAG         "enable SVF support"                           ${ENABLE_CABLE_ALL})
+option(ENABLE_TT_MICROPYTHON   "enable TinyTapeout MicroPython support"       ${ENABLE_CABLE_ALL})
 option(ENABLE_USB_BLASTERI     "enable Altera USB Blaster I support"          ${ENABLE_CABLE_ALL})
 option(ENABLE_USB_BLASTERII    "enable Altera USB Blaster II support"         ${ENABLE_CABLE_ALL})
 
@@ -592,6 +593,12 @@ list (APPEND OPENFPGALOADER_HEADERS src/svf_jtag.hpp)
 add_definitions(-DENABLE_SVF_JTAG)
 endif()
 
+# TinyTapeout MicroPython
+if (ENABLE_TT_MICROPYTHON)
+list(APPEND OPENFPGALOADER_SOURCE  src/ttMicropython.cpp)
+list(APPEND OPENFPGALOADER_HEADERS src/ttMicropython.hpp)
+endif()
+
 # Xilinx Virtual Cable
 if (ENABLE_XILINX_VIRTUAL_CABLE_CLIENT)
 list (APPEND OPENFPGALOADER_SOURCE  src/xvc_client.cpp)
@@ -663,6 +670,11 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 
 	target_sources(openFPGALoader PRIVATE src/pathHelper.cpp)
 	list(APPEND OPENFPGALOADER_HEADERS src/pathHelper.hpp)
+
+	# TT MicroPython auto-detection uses SetupDi
+	if (ENABLE_TT_MICROPYTHON)
+		target_link_libraries(openFPGALoader setupapi)
+	endif()
 endif()
 
 # libusb_attach_kernel_driver is only available on Linux.
@@ -675,9 +687,9 @@ if (ENABLE_UDEV)
 	target_link_libraries(openFPGALoader ${LIBUDEV_LIBRARIES})
 endif()
 
-if (ENABLE_UDEV OR ENABLE_LIBGPIOD OR ENABLE_JETSONNANOGPIO)
+if (ENABLE_UDEV OR ENABLE_LIBGPIOD OR ENABLE_JETSONNANOGPIO OR ENABLE_TT_MICROPYTHON)
 	add_definitions(-DUSE_DEVICE_ARG)
-endif(ENABLE_UDEV OR ENABLE_LIBGPIOD OR ENABLE_JETSONNANOGPIO)
+endif(ENABLE_UDEV OR ENABLE_LIBGPIOD OR ENABLE_JETSONNANOGPIO OR ENABLE_TT_MICROPYTHON)
 
 if (BUILD_STATIC)
 	set_target_properties(openFPGALoader PROPERTIES LINK_SEARCH_END_STATIC 1)
@@ -718,6 +730,14 @@ if (ENABLE_DFU)
 	message("DFU support enabled")
 else()
 	message("DFU support disabled")
+endif()
+
+# TinyTapeout MicroPython
+if (ENABLE_TT_MICROPYTHON)
+	add_definitions(-DENABLE_TT_MICROPYTHON=1)
+	message("TinyTapeout MicroPython support enabled")
+else()
+	message("TinyTapeout MicroPython support disabled")
 endif()
 
 # dirtyJtag

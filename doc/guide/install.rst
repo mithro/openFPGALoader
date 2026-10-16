@@ -381,6 +381,7 @@ Example (enable FTDI-based cables and Xilinx devices only):
 - ``ENABLE_FTDI_BASED_CABLE``: Enable FTDI-based cable drivers (requires libftdi).
 - ``ENABLE_GOWIN_GWU2X``: Enable Gowin GWU2X interface support.
 - ``ENABLE_SVF_JTAG``: Enable SVF JTAG playback support.
+- ``ENABLE_TT_MICROPYTHON``: Enable the Tiny Tapeout FPGA Demo Board driver (MicroPython raw REPL over USB serial, no library needed).
 - ``ENABLE_USB_BLASTERI``: Enable Altera USB-Blaster I support.
 - ``ENABLE_USB_BLASTERII``: Enable Altera USB-Blaster II support.
 - ``ENABLE_LIBGPIOD``: Enable libgpiod bitbang driver support (Linux only).
