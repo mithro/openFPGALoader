@@ -165,11 +165,13 @@ static void ice40_slave_on_signal(int sig)
 	ice40_slave_signal = sig;
 }
 
-/* SIGINT, SIGTERM and SIGHUP stop the load, at the next bit, instead of
- * killing the process with the iCE40 left unconfigured in slave mode: the
- * load then gives the bus back and resets the iCE40 to boot from its flash.
+/* SIGINT, SIGTERM, SIGHUP, SIGQUIT and SIGPIPE stop the load, at the next
+ * bit, instead of killing the process with the iCE40 left unconfigured in
+ * slave mode: the load then gives the bus back and resets the iCE40 to boot
+ * from its flash.
  * Installed for the duration of the load; the previous handlers are put
- * back afterwards. SIGKILL cannot be caught.
+ * back afterwards. SIGKILL cannot be caught, and a crash
+ * (SIGSEGV, SIGBUS, SIGABRT) is not handled.
  */
 class Ice40SlaveSignals {
 	public:
@@ -179,7 +181,7 @@ class Ice40SlaveSignals {
 			memset(&sa, 0, sizeof(sa));
 			sa.sa_handler = ice40_slave_on_signal;
 			sigemptyset(&sa.sa_mask);
-			for (_n = 0; _n < 3; _n++) {
+			for (_n = 0; _n < 5; _n++) {
 				if (sigaction(sigs()[_n], &sa, &_old[_n]) != 0) {
 					int err = errno;
 					restore();
@@ -194,7 +196,8 @@ class Ice40SlaveSignals {
 		}
 	private:
 		static const int *sigs() {
-			static const int s[3] = {SIGINT, SIGTERM, SIGHUP};
+			static const int s[5] = {SIGINT, SIGTERM, SIGHUP, SIGQUIT,
+				SIGPIPE};
 			return s;
 		}
 		void restore() {
@@ -205,7 +208,7 @@ class Ice40SlaveSignals {
 						strerror(errno));
 			_n = 0;
 		}
-		struct sigaction _old[3];
+		struct sigaction _old[5];
 		int _n;
 };
 
@@ -265,7 +268,7 @@ std::string Ice40::let_go_reset()
 /* SRAM load as an SPI slave over any Ice40SpiSlaveInterface: TN-02001
  * section 13.2 and Appendix A Table A.1, timings from DS-02008 Table 4.24.
  * Throws std::runtime_error, saying what was done to give the board back,
- * on any failure, and when SIGINT, SIGTERM or SIGHUP stops it.
+ * on any failure, and when SIGINT, SIGTERM, SIGHUP, SIGQUIT or SIGPIPE stops it.
  */
 void Ice40::program_cram_slave(const uint8_t *data, uint32_t length)
 {

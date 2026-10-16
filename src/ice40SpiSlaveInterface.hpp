@@ -35,6 +35,8 @@ class Ice40SpiSlaveAborted: public std::runtime_error {
 		static std::string name(int sig) {
 			switch (sig) {
 			case SIGHUP: return "SIGHUP";
+			case SIGQUIT: return "SIGQUIT";
+			case SIGPIPE: return "SIGPIPE";
 			case SIGINT: return "SIGINT";
 			case SIGTERM: return "SIGTERM";
 			default: return "signal " + std::to_string(sig);
