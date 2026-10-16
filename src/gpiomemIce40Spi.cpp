@@ -62,9 +62,10 @@
 
 /* every SPI_SCK phase is sized for 25 ns or more, hence every period for
  * 50 ns or more (at or under 20 MHz); the loop's own overhead is counted as
- * write time, so a real phase may be a few ns shorter than sized: the data sheet's SPI_SCK high and low
- * times are 20 ns or more and its maximum is 25 MHz (DS-02008 Table 4.24
- * tCCLKH, tCCLKL, fMAX). Nothing measures the slew at the pad.
+ * write time, so a real phase may be a few ns shorter than sized. The data
+ * sheet's SPI_SCK high and low times are 20 ns or more and its maximum is
+ * 25 MHz (DS-02008 Table 4.24 tCCLKH, tCCLKL, fMAX). Nothing measures the
+ * slew at the pad.
  */
 #define SCK_PHASE_NS	25.0
 /* at the slowest CPU clock a bit must still take 1 us or less, or 1 MHz
@@ -242,13 +243,14 @@ GpiomemIce40Spi::~GpiomemIce40Spi()
 	if (bad) {
 		std::string lines;
 		for (int pin : _bus)
-			lines += std::to_string(pin) + ",";
+			lines += (lines.empty() ? "" : ",") + std::to_string(pin);
 		stuck.push_back(std::to_string(bad) + " pin(s) did not read back "
 			"as their saved function: they may still be driven and CRESET_B "
-			"may be held low. Recover: pinctrl set " + lines +
-			std::to_string(_pins.creset) + " ip (CRESET_B last), then "
-			"pinctrl get " + std::to_string(_pins.cdone) + " must show CDONE "
-			"high; if it stays low, power-cycle the board");
+			"may be held low. Recover with two commands, the bus lines "
+			"first: pinctrl set " + lines + " ip; then pinctrl set " +
+			std::to_string(_pins.creset) + " ip; then pinctrl get " +
+			std::to_string(_pins.cdone) + " must show CDONE high; if it "
+			"stays low, power-cycle the board");
 	}
 	for (const std::string &s : stuck)
 		printError("gpiomem iCE40 SPI: " + s);
@@ -375,7 +377,7 @@ static uint32_t shift_bits(Ice40GpioRegs *regs,
 
 void GpiomemIce40Spi::prepare()
 {
-	/* first of all, before any line is read or driven: Ice40 times the
+	/* first of all, before any pin is driven or changed: Ice40 times the
 	 * image from its first write, so calibration is not in that time, and
 	 * a host that cannot load stops here with the board untouched
 	 */

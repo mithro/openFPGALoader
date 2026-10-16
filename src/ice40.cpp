@@ -282,7 +282,7 @@ void Ice40::program_cram_slave(const uint8_t *data, uint32_t length)
 	} abort_flag(_slave);
 
 	/* the backend settles what needs no line (its clock, its limits)
-	 * before anything is read or driven: a host that can never load stops
+	 * before any pin is driven or changed: a host that can never load stops
 	 * here with the running design untouched
 	 */
 	_slave->prepare();

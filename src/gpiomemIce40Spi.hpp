@@ -132,7 +132,7 @@ class GpiomemRegs : public Ice40GpioRegs {
  * least 50 ns (so at or under 20 MHz), against the data sheet's 20 ns
  * minimum SCK high and low time and 25 MHz maximum (DS-02008 Table 4.24
  * tCCLKH, tCCLKL, fMAX). The padding is calibrated once, in prepare() (before
- * any line is read or driven, so a host that cannot load stops with the
+ * any pin is driven or changed, so a host that cannot load stops with the
  * Fomu's design running), with
  * zero-mask writes (no pin moves), at the CPU clock cpufreq reports, and
  * scaled to the CPU's maximum clock: every cost measured is taken to be

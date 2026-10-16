@@ -74,7 +74,7 @@ class Ice40SpiSlaveInterface {
 		}
 
 		/*!
-		 * \brief called first by the load, before anything is read or driven:
+		 * \brief called first by the load, before any pin is driven or changed:
 		 *        whatever a backend must settle without touching a line
 		 *        (a host that can never load stops here, with the board's
 		 *        running design untouched). Throws if the load cannot go on.
