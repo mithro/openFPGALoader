@@ -99,16 +99,50 @@ load through /dev/gpiomem registers: ...``):
   the GPIO registers are written directly: GPFSELn at 0x00-0x14 (3 bits per
   pin, 000 input, 001 output), GPSET0 at 0x1C, GPCLR0 at 0x28, GPLEV0 at 0x34
   (BCM2835 ARM Peripherals section 6.1, BCM2711 ARM Peripherals section 5.2),
-  GPIO 0-31 only; the pull registers are never touched. The kernel does not
-  know of these accesses, so a pin in an alternate function (SPI0's GPIO8-11,
-  say) is refused instead of taken over. Each pin's function is saved before
-  it is first changed and put back, and read back, on every way out of the
-  load, a failure or a signal included. The loop pads every SPI_SCK period to
-  50 ns or more (it measures its own speed before every write), so the clock
-  stays under 20 MHz whatever the CPU runs at; the 1 to 25 MHz check below
-  remains the authority. If ``/dev/gpiomem`` is absent or cannot be opened
-  read/write on such a host the load stops and says why (and asks "is the user
-  in the gpio group?"); it does not fall back to libgpiod.
+  GPIO 0-31 only; the pull registers are never touched. A
+  ``compatible`` that does not exist (not a device-tree host) selects
+  libgpiod; one that exists and cannot be read stops the load.
+  If ``/dev/gpiomem`` is absent or cannot be opened read/write on such a host
+  the load stops and says why (and asks "is the user in the gpio group?"); it
+  does not fall back to libgpiod.
+
+  The kernel knows nothing of these accesses, and does none of its usual
+  cleanup:
+
+  * A pin in an alternate function (SPI0's GPIO8-11, say) is refused instead
+    of taken over, and so is any of the seven lines that is already an
+    output (an earlier load was killed before it put the pins back): the
+    message names the pins and the command that puts them back,
+    ``pinctrl set <n> ip``.
+  * A GPFSEL register holds ten pins. Changing one pin's function is a
+    read-modify-write, and another writer changing a different pin of the same
+    register between the read and the write has its change lost.
+  * Each pin's function is saved before it is first changed and put back, and
+    read back, when the load ends by success, error, SIGINT, SIGTERM, SIGHUP,
+    SIGQUIT or SIGPIPE. CRESET_B is let go only if every bus line read back
+    as saved.
+  * **Every other way out leaves the pins driven**, CRESET_B low (the iCE40
+    held in reset) and the SPI lines out, until they are put back: SIGKILL,
+    SIGSEGV, SIGBUS, SIGABRT, ``abort()``, ``std::terminate()``, ``exit()`` or
+    ``_exit()`` called from elsewhere. libgpiod gives its lines back when
+    the process dies; this path does not. Recover with ``pinctrl set <n> ip``
+    for the lines and a pulse on CRESET_B so that the iCE40 boots its flash
+    (the Fomu's header check on the fpgas.online fleet pulses it).
+
+  The SPI_SCK period is padded to 50 ns or more, each phase to 25 ns or
+  more, so the clock is at or under 20 MHz; the data sheet allows 25 MHz and
+  asks 20 ns or more for the SCK high and low times (DS-02008 Table 4.24).
+  The padding is calibrated once, just before the image, from register
+  writes that move no pin, at the CPU clock cpufreq reports, and scaled to the
+  CPU's maximum clock (every cost is taken to be CPU-bound, so it is shorter
+  there). The load also checks that, scaled to the CPU's minimum clock
+  (``cpuinfo_min_freq``), a bit still takes 1 us or less, so that 1 MHz stays
+  reachable; if cpufreq cannot be read, or a bit would take longer, the load
+  stops before the image. This assumes the register writes are posted and
+  reach the pins no sooner than the CPU issues them, so spacing the writes
+  spaces the edges at least as far apart. Nothing here can check that: the
+  hardware trial measures the real rate and edge spacing. The 1 to 25 MHz
+  check below remains the authority on the mean.
 * libgpiod on any other host (a Pi 5, whose RP1 has no such registers, for
   one), and whenever ``-d /dev/gpiochipN`` names a chip; without ``-d`` the
   chip is the one labelled ``pinctrl-rp1`` (Pi 5), ``pinctrl-bcm2711`` (Pi 4)
@@ -137,12 +171,13 @@ the host's output into the iCE40's SPI_SI (``9:10:11:8:25`` for the Fomu EVT).
 
 .. WARNING::
   The iCE40 needs a slave configuration clock of 1 to 25 MHz (DS-02008
-  Table 4.24). On a Pi 3 Model B+ libgpiod (one or two system calls per clock
-  edge) was measured at 0.440 MHz, under the minimum, and the load stopped
-  with that rate: libgpiod cannot do this load on that host, which is why
-  ``/dev/gpiomem`` is used there. The ``/dev/gpiomem`` path has not been tried
-  on hardware. If a load's clock falls outside 1 to 25 MHz the load stops with
-  the measured rate, and the iCE40 boots its flash again. Nothing here says the
+  Table 4.24). On a Pi 3 Model B+ libgpiod (one or two system calls per
+  clock edge) was measured at 0.440 MHz, under the minimum, and the load
+  stopped with that rate: libgpiod cannot do this load on that host, which is
+  why ``/dev/gpiomem`` is used there. The ``/dev/gpiomem`` path has not been
+  tried on hardware, and its edge spacing rests on the assumption stated
+  above. If a load's clock falls outside 1 to 25 MHz the load stops with the
+  measured rate, and the iCE40 boots its flash again. Nothing here says the
   load succeeds on any Pi.
 
 The load needs a configured iCE40 to start from (CDONE high: it proves, by
@@ -150,18 +185,20 @@ CDONE falling under CRESET_B, that an iCE40 is held on that reset before any
 bus line is driven), and checks CDONE high after the image. The SPI_SCK rate
 is measured for every 4 KiB of the image and over the whole image; outside
 1 to 25 MHz the load stops (a stall that pulls the rate of one 4 KiB chunk
-under 1 MHz stops it too: Table A.1 asks for a continuous clock). ``--freq`` and ``--offset`` are refused: the rate cannot
-be set, only measured. After a failure the lines are released and the iCE40
+under 1 MHz stops it too: Table A.1 asks for a continuous clock).
+``--freq`` and ``--offset`` are refused: the rate cannot be set, only
+measured. After a failure the lines are released and the iCE40
 is reset to boot from its flash again.
 
-SIGINT, SIGTERM and SIGHUP stop the load at the next bit and take the same
-path: the lines released, the iCE40 reset to boot from its flash, CDONE
-checked, a non-zero exit. SIGKILL cannot be caught: a load killed with it
-leaves the iCE40 unconfigured (CDONE low), and every later load and the
-Fomu's header check refuse to start until the board is power-cycled. A
-caller that needs a time limit must send SIGTERM and give the recovery time
-before any SIGKILL, for example ``timeout -k 30 120 openFPGALoader ...``
-(never ``timeout -s KILL``).
+SIGINT, SIGTERM, SIGHUP, SIGQUIT and SIGPIPE stop the load at the next bit
+and take the same path: the lines released, the iCE40 reset to boot from its
+flash, CDONE checked, a non-zero exit. SIGKILL cannot be caught: a load killed
+with it leaves the iCE40 unconfigured (CDONE low). With libgpiod the kernel
+gives the lines back and every later load and the Fomu's header check refuse
+to start until the board is power-cycled; with ``/dev/gpiomem`` the pins also
+stay driven (see above). A caller that needs a time limit must send SIGTERM
+and give the recovery time before any SIGKILL, for example
+``timeout -k 30 120 openFPGALoader ...`` (never ``timeout -s KILL``).
 
 ECP5/ECP3/Certus-NX/CertusPro-NX/Crosslink-NX
 =============================================
